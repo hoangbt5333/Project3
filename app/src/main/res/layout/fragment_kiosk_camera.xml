@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#121212">
+
+    <!-- Header Toolbar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#1E1E1E"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Kiosk UVC Camera Tester"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvStatusBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#333333"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="4dp"
+            android:text="Đang kết nối..."
+            android:textColor="#FFCC00"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Main Content Area -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- Camera Container -->
+        <FrameLayout
+            android:id="@+id/cameraContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#000000">
+
+            <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
+                android:id="@+id/uvcSurfaceView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center" />
+
+            <TextView
+                android:id="@+id/tvCameraOverlayStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:background="#99000000"
+                android:padding="16dp"
+                android:text="Đang kết nối Camera UVC Kiosk...\nVui lòng cho phép quyền USB khi hệ thống hỏi."
+                android:textAlignment="center"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+        </FrameLayout>
+
+        <!-- Dynamic Camera Selector Bar -->
+        <LinearLayout
+            android:id="@+id/layoutCameraSelector"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1F1F1F"
+            android:orientation="vertical"
+            android:padding="6dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🎯 Chọn Camera UVC để mở (Mắt Màu RGB vs Mắt Hồng Ngoại IR):"
+                android:textColor="#FFCC00"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/containerCameraButtons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="4dp" />
+        </LinearLayout>
+
+        <!-- Diagnostic / Log Section -->
+        <ScrollView
+            android:id="@+id/scrollDiagnosticPanel"
+            android:layout_width="match_parent"
+            android:layout_height="160dp"
+            android:background="#181818"
+            android:padding="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- USB Devices Section -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔌 Thiết bị USB kết nối:"
+                    android:textColor="#4CAF50"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvUsbDevicesInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="6dp"
+                    android:text="Đang quét thiết bị USB..."
+                    android:textColor="#DDDDDD"
+                    android:textSize="12sp"
+                    tools:ignore="RtlSymmetry" />
+
+                <!-- System Camera2 Section -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📷 Camera hệ thống Android (Camera2):"
+                    android:textColor="#2196F3"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSystemCamerasInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="6dp"
+                    android:text="Đang quét camera hệ thống..."
+                    android:textColor="#DDDDDD"
+                    android:textSize="12sp"
+                    tools:ignore="RtlSymmetry" />
+
+                <!-- Diagnostic Event Log -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📜 Nhật ký sự kiện (Event Log):"
+                    android:textColor="#FF9800"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvLogConsole"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="8dp"
+                    android:fontFamily="monospace"
+                    android:text="Khởi tạo ứng dụng...\n"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    tools:ignore="RtlSymmetry" />
+
+            </LinearLayout>
+        </ScrollView>
+
+    </LinearLayout>
+
+    <!-- Bottom Controls Card -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#222222"
+        android:orientation="horizontal"
+        android:padding="6dp">
+
+        <Button
+            android:id="@+id/btnSwitchCamera"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="🔄 Chuyển Cam"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnReopenCamera"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="▶️ Mở lại Cam"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnCapturePhoto"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="📸 Chụp ảnh"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnToggleLogView"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📊 Ẩn/Hiện Log"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+</LinearLayout>
