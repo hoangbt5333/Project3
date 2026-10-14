@@ -1,0 +1,361 @@
+TASK: Audit, Fix and Simplify Android UVC Camera Integration for Kiosk
+1. Project context
+
+I am developing an Android Kiosk application using Android Studio.
+
+The final application will eventually support:
+
+Face capture and face recognition.
+Identity verification.
+Displaying user information and academic scores after successful verification.
+
+The kiosk hardware uses two USB UVC cameras:
+
+Thermal camera — typically produces monochrome or thermal-related image data.
+RGB camera — expected to provide normal color images.
+Current development stage
+
+The current milestone is ONLY camera integration and validation.
+
+The application can already open and display an image from what I believe is the thermal camera. However, I have not confirmed whether the RGB camera is being detected, opened, and read correctly.
+
+I want to simplify the current codebase and UI so that I can focus on establishing a reliable connection to both cameras.
+
+2. Primary objectives
+
+Work directly with the existing Android Studio project.
+
+Your objectives are:
+
+Understand the current application architecture before modifying anything.
+Identify the exact UVC camera integration library and API currently used.
+Verify how USB devices are discovered, how permission is requested, and how camera streams are initialized.
+Determine whether both physical cameras can be opened and read independently.
+Diagnose why the RGB camera may not be working or may be displaying monochrome images.
+Remove or disable functionality that is unrelated to the current camera integration milestone.
+Retain a small, reliable camera testing interface.
+Build and test the application where the available environment permits.
+
+Do not rebuild the application from scratch. Reuse the existing architecture and dependencies wherever practical.
+
+3. Phase 1 — Audit the existing project
+
+Before making changes, inspect the project structure and the relevant source files.
+
+Inspect, as applicable:
+
+settings.gradle and the module-level build.gradle or build.gradle.kts.
+AndroidManifest.xml.
+Activity, Fragment, Compose screen, or custom View responsible for camera preview.
+USB device discovery and permission handling.
+Camera initialization, preview, frame callbacks, and cleanup.
+USB connection and disconnection listeners.
+UVC library dependencies and native libraries.
+Camera-related threads, executors, handlers, and lifecycle callbacks.
+Existing logging and error handling.
+
+Identify the actual implementation rather than assuming a particular library.
+
+For example, determine whether the project uses a library based on UVCCamera, USBMonitor, libuvc, a vendor SDK, or another implementation.
+
+Before modifying code, provide a concise audit report covering:
+
+Current camera architecture and frame-processing flow.
+The files and classes responsible for UVC discovery, permission, opening, streaming, and rendering.
+How the application distinguishes the thermal camera from the RGB camera.
+The most likely reasons why the RGB camera is not working.
+Confirmed defects versus unverified hypotheses.
+The minimal changes required to reach the current milestone.
+
+Do not claim that the RGB camera is operational merely because the app launches or the thermal preview works.
+
+After reporting the findings, proceed with the necessary changes unless a critical missing piece of information prevents safe implementation.
+
+4. Phase 2 — Validate Android USB/UVC integration
+4.1. USB device discovery
+
+Inspect the actual USB device discovery mechanism.
+
+Enumerate connected USB devices using the existing UVC library or Android USB Host APIs as appropriate.
+Inspect available device information, including device name, vendor ID, product ID, device class, interface descriptors, and endpoint information where accessible.
+Determine whether each physical camera exposes multiple interfaces or streaming formats.
+Do not assume that one USB device corresponds to exactly one camera stream.
+Do not assume that a fixed device index permanently identifies the RGB or thermal camera.
+Distinguish USB device discovery from successful UVC initialization.
+
+If the existing library provides device enumeration and supported-format information, use it instead of creating a competing device-management mechanism.
+
+4.2. Android USB permissions
+
+Verify the complete USB permission flow:
+
+Detect the USB device.
+Request user permission through the appropriate Android USB Host mechanism.
+Handle the permission result.
+Open the correct USB device or connection.
+Initialize the UVC camera.
+Start preview or frame streaming.
+Release the connection and camera resources correctly.
+
+Inspect AndroidManifest.xml and any USB device filters or attachment-handling configuration.
+
+Account for the actual Android version and the existing app architecture.
+
+Check for:
+
+Missing USB Host feature declarations where required.
+Incorrect USB device filters.
+Incorrect permission request or broadcast handling.
+Receiver registration issues, including applicable Android 12+ exported-receiver requirements.
+Missing permission checks or lifecycle handling.
+Attempts to open a camera before USB permission has been granted.
+
+Do not add unnecessary Android permissions unrelated to the current implementation.
+
+4.3. UVC camera initialization
+
+Verify:
+
+The correct device is passed to the UVC library.
+The camera control block or equivalent resource is initialized successfully.
+Preview dimensions and pixel format are supported by the device and library.
+The selected streaming format is compatible with the camera and rendering path.
+Preview initialization errors are captured and reported.
+Camera initialization is not duplicated by multiple lifecycle callbacks.
+The camera is closed and its resources released correctly.
+
+Do not assume every camera supports MJPEG, YUYV/YUY2, NV12, or the same resolution and frame rate.
+
+Inspect supported formats where possible and choose a valid configuration.
+
+If a library uses native code, verify that its native dependencies and ABI configuration are compatible with the target Android device.
+
+5. Phase 3 — Diagnose and activate the RGB camera
+
+This is the highest-priority functional task.
+
+Determine whether the RGB camera:
+
+Is physically detected by Android.
+Receives USB permission.
+Can be initialized through the current UVC library.
+Supports at least one usable streaming configuration.
+Can deliver valid frames continuously.
+Produces actual color data that survives the processing and rendering pipeline.
+
+Trace the complete data path:
+
+USB device → UVC initialization → stream configuration → frame callback → pixel-format conversion → preview rendering
+
+Inspect for:
+
+Opening the wrong physical camera.
+Selecting an unsupported resolution or frame format.
+Incorrect MJPEG decoding or YUYV/YUY2 conversion.
+RGB/BGR channel-order mistakes.
+Incorrect buffer sizes or row strides.
+Accidental conversion to grayscale.
+Rendering a monochrome intermediate image instead of the original color frame.
+Stale frames or callbacks that stop unexpectedly.
+Incorrect handling of camera disconnection and reconnection.
+
+Do not force a pixel format unless the device and library support it.
+
+If the RGB camera still displays monochrome images, distinguish between these possible causes:
+
+The application opened the thermal camera instead of the RGB camera.
+The RGB camera itself is configured to provide a monochrome stream.
+The selected UVC format is a monochrome format.
+A frame-processing step converts color data to grayscale.
+The pixel format is being decoded or interpreted incorrectly.
+The hardware, firmware, driver, or current library does not expose the expected color stream.
+
+Use frame metadata, supported streaming formats, logs, and actual preview output as evidence.
+
+If the current library cannot expose sufficient information, explain that limitation and propose the smallest practical diagnostic change.
+
+6. Phase 4 — Verify whether both cameras can run simultaneously
+
+Test the cameras individually first, then test concurrent operation.
+
+For simultaneous operation:
+
+Open each camera through the appropriate independent device/session objects.
+Maintain separate preview surfaces or rendering targets.
+Maintain independent stream state and error reporting.
+Ensure one camera's failure does not unnecessarily stop the other.
+Avoid blocking the Android main thread while waiting for frames.
+Avoid unsafe concurrent access to the same camera object.
+Stop streams and release USB connections correctly.
+Handle device detach, reconnect, Activity destruction, and app shutdown.
+
+Do not assume simultaneous streaming is supported simply because both cameras can be opened separately.
+
+Check practical hardware constraints, including:
+
+USB bandwidth.
+USB hub and host-controller limitations.
+Power availability.
+Camera resolutions and frame rates.
+Limitations of the current UVC library or native implementation.
+
+If concurrent streaming fails, record the exact error and determine whether the problem is in application logic, library support, device capability, bandwidth, or power.
+
+Do not silently switch to another camera when initialization fails.
+
+7. Phase 5 — Simplify the application
+
+Refactor only what is necessary for the current milestone.
+
+Keep
+Existing Android application startup and essential navigation.
+UVC device discovery.
+USB permission handling.
+Camera initialization and configuration.
+Frame acquisition and preview rendering.
+Camera state management.
+Error handling and resource cleanup.
+Essential diagnostic logging.
+Existing build configuration and dependencies required for camera operation.
+Remove or temporarily disable
+Face recognition and face matching.
+Identity verification.
+User database queries and academic-score retrieval.
+Authentication or network services that are not required to open the cameras.
+Screens, buttons, animations, and workflows unrelated to camera testing.
+Duplicate camera initialization code.
+Unused variables, imports, dead code, and redundant abstractions.
+Verbose logs that do not help diagnose camera behavior.
+
+Do not delete working modules indiscriminately.
+
+Prefer isolating or disabling unrelated functionality over permanently removing code that will be needed in later milestones.
+
+Do not modify unrelated features or perform a large architectural rewrite solely to reduce the number of files.
+
+Preserve compatibility with the project's existing Kotlin/Java version, Android Gradle Plugin, minimum SDK, target SDK, and UVC library.
+
+Do not introduce new dependencies unless they are necessary and the reason is documented.
+
+8. Phase 6 — Minimal camera test UI
+
+Create or simplify the existing screen into a dedicated UVC camera testing screen.
+
+Where the hardware and UI layout permit, display two independent preview panels:
+
+Thermal Camera
+Device identity or USB identifiers.
+Connection and streaming status.
+Actual preview.
+Resolution.
+Pixel format, if available.
+Measured FPS.
+Relevant error message.
+RGB Camera
+Device identity or USB identifiers.
+Connection and streaming status.
+Actual preview.
+Resolution.
+Pixel format, if available.
+Measured FPS.
+Relevant error message.
+
+Use concise states such as:
+
+Not detected
+Permission required
+Opening
+Connected
+Streaming
+Error
+
+Do not mark a camera as streaming merely because its USB device has been detected.
+
+Where the existing architecture permits, provide simple controls to:
+
+Connect or initialize each camera.
+Stop each stream.
+Retry after a failure.
+Display essential device diagnostics.
+
+Keep detailed logs in Logcat rather than displaying a large log panel on the screen.
+
+If the physical identity of either camera has not been established, label it Camera A or Camera B until verified. Do not label devices as Thermal or RGB based only on device order or image appearance.
+
+9. Phase 7 — Lifecycle, stability, and code quality
+
+Ensure that:
+
+USB permission requests and results are handled correctly.
+Preview initialization does not block the main thread.
+Frame callbacks cannot update destroyed views or Activities.
+Camera resources are released during the appropriate lifecycle transitions.
+USB detach events stop or clean up the affected stream.
+Reconnection does not create duplicate sessions or callbacks.
+Repeated open/close operations do not leak resources.
+Failure of one camera does not corrupt the state of the other.
+Logging contains enough context to identify the device and failure stage.
+
+Avoid introducing unnecessary services, abstractions, state-management frameworks, or dependency changes.
+
+Keep the implementation simple and consistent with the existing project.
+
+10. Phase 8 — Build and testing
+
+Run the relevant Gradle build tasks and existing tests where possible.
+
+Perform the following checks:
+
+Application builds successfully.
+USB camera devices are enumerated.
+Permission is requested and handled correctly.
+Thermal camera opens and delivers valid frames.
+RGB camera opens and delivers valid frames.
+RGB output is verified as color when the hardware supports color streaming.
+Each camera can be stopped and reopened.
+Both cameras can stream simultaneously if supported.
+Camera detach and reconnect are handled safely.
+The application can close without leaving camera resources active.
+
+For every test, report:
+
+The test performed.
+Actual result.
+Relevant Logcat output or other evidence.
+Whether the test was performed on real hardware, an emulator, or through static code inspection.
+Any remaining uncertainty.
+
+Do not claim successful hardware validation if no physical cameras are available to test.
+
+Do not treat a successful Gradle build as proof that the cameras work.
+
+11. Final deliverables
+
+Provide a concise report containing:
+
+Current camera architecture.
+Root cause of the RGB camera issue, if established.
+Confirmed status of the thermal camera.
+Confirmed status of the RGB camera.
+Whether concurrent streaming was tested and supported.
+Files changed and the purpose of each change.
+Removed or disabled functionality.
+Build and test results.
+Remaining issues and the exact next diagnostic steps.
+Commands or steps needed to launch and test the application.
+12. Definition of done
+
+The milestone is complete when:
+
+The application has a minimal camera-testing interface.
+The physical USB devices can be identified as far as the available metadata allows.
+The application can open and read valid frames from each camera individually.
+The RGB camera is verified to deliver color data when supported by the hardware.
+Concurrent streaming is validated if supported by the hardware and library, or its limitation is documented.
+Camera states and errors are observable.
+Camera resources are released safely.
+The project builds successfully.
+
+If any hardware-dependent requirement cannot be verified, clearly label it as unverified instead of claiming completion.
+
+Start by auditing the existing code and reporting the current implementation. Then make the smallest necessary changes, run the available tests, and provide the final report. Do not stop after providing recommendations if you can directly edit and test the project.
