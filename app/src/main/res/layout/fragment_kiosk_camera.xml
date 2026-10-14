@@ -243,6 +243,11 @@
                     android:layout_height="match_parent"
                     android:layout_gravity="center" />
 
+                <com.example.testcamera.ui.FaceOverlayView
+                    android:id="@+id/faceOverlayB"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
                 <TextView
                     android:id="@+id/tvOverlayB"
                     android:layout_width="wrap_content"
@@ -264,6 +269,17 @@
                 android:text="Độ phân giải: -- | FPS: 0"
                 android:textColor="#29B6F6"
                 android:textSize="10sp"
+                android:fontFamily="monospace" />
+
+            <!-- ML Kit Face Detection Status -->
+            <TextView
+                android:id="@+id/tvFaceStatusB"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="👤 ML Kit: Khởi tạo..."
+                android:textColor="#00E676"
+                android:textSize="10sp"
+                android:textStyle="bold"
                 android:fontFamily="monospace" />
 
             <!-- Control Buttons B -->

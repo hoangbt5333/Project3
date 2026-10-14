@@ -50,6 +50,9 @@ dependencies {
     implementation("com.github.jiangdongguo.AndroidUSBCamera:libausbc:3.2.7")
     implementation("com.github.jiangdongguo.AndroidUSBCamera:libnative:3.2.7")
     implementation("com.github.jiangdongguo.AndroidUSBCamera:libuvc:3.2.7")
+
+    // Google ML Kit Face Detection
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }
 
 configurations.all {

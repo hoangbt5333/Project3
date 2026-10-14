@@ -13,6 +13,10 @@ import androidx.fragment.app.Fragment
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
 import com.example.testcamera.util.UsbDeviceInfo
 import com.example.testcamera.util.UsbDiagnosticHelper
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetector
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.jiangdg.ausbc.MultiCameraClient
 import com.jiangdg.ausbc.callback.ICameraStateCallBack
 import com.jiangdg.ausbc.callback.ICaptureCallBack
@@ -24,6 +28,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class KioskCameraFragment : Fragment() {
 
@@ -44,6 +49,12 @@ class KioskCameraFragment : Fragment() {
     private var frameCountB = 0
     private var fpsB = 0
 
+    // Google ML Kit Face Detection
+    private var faceDetector: FaceDetector? = null
+    private val isProcessingFaceFrame = AtomicBoolean(false)
+    private var faceDetectCount = 0
+    private var faceDetectFps = 0
+
     private var isLogPanelVisible = true
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -53,6 +64,9 @@ class KioskCameraFragment : Fragment() {
             frameCountA = 0
             fpsB = frameCountB
             frameCountB = 0
+
+            faceDetectFps = faceDetectCount
+            faceDetectCount = 0
 
             if (_binding != null) {
                 updateStatsPanelA()
@@ -76,10 +90,28 @@ class KioskCameraFragment : Fragment() {
 
         appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk...")
 
+        initFaceDetector()
         initMultiCameraClient()
         setupListeners()
 
         mainHandler.post(fpsRunnable)
+    }
+
+    private fun initFaceDetector() {
+        try {
+            val options = FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setMinFaceSize(0.15f)
+                .build()
+            faceDetector = FaceDetection.getClient(options)
+            binding.tvFaceStatusB.text = "👤 ML Kit: Sẵn sàng (Ready)"
+            appendLog("✅ Khởi tạo Google ML Kit Face Detector thành công.")
+        } catch (e: Exception) {
+            appendLog("❌ Lỗi khởi tạo ML Kit Face Detector: ${e.message}")
+            binding.tvFaceStatusB.text = "⚠️ ML Kit: Lỗi khởi tạo (${e.message})"
+        }
     }
 
     private fun initMultiCameraClient() {
@@ -267,7 +299,6 @@ class KioskCameraFragment : Fragment() {
         }
 
         appendLog("▶️ Bắt đầu mở luồng video Camera A...")
-        // Permission is already granted; trigger requestPermission to receive control block via callback
         mMultiCameraClient?.requestPermission(device)
     }
 
@@ -296,7 +327,6 @@ class KioskCameraFragment : Fragment() {
         } else if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
             openCameraPanelB(device, ctrlBlock)
         } else {
-            // If assignedDeviceA was null, assign it now
             if (assignedDeviceA == null) {
                 assignedDeviceA = device
                 openCameraPanelA(device, ctrlBlock)
@@ -386,6 +416,7 @@ class KioskCameraFragment : Fragment() {
                             binding.tvStatusBadgeB.text = "STREAMING"
                             binding.tvStatusBadgeB.setBackgroundColor(0xFF2E7D32.toInt())
                             binding.tvOverlayB.visibility = View.GONE
+                            binding.tvFaceStatusB.text = "👤 ML Kit: Đang quét khuôn mặt..."
                         }
                         ICameraStateCallBack.State.CLOSED -> {
                             appendLog("🔴 Camera B: Đã đóng.")
@@ -393,6 +424,8 @@ class KioskCameraFragment : Fragment() {
                             binding.tvStatusBadgeB.setBackgroundColor(0xFF757575.toInt())
                             binding.tvOverlayB.text = "Camera B đã đóng"
                             binding.tvOverlayB.visibility = View.VISIBLE
+                            binding.faceOverlayB.clear()
+                            binding.tvFaceStatusB.text = "👤 ML Kit: Camera B đã đóng"
                         }
                         ICameraStateCallBack.State.ERROR -> {
                             appendLog("❌ Camera B Lỗi: ${msg ?: "Không xác định"}")
@@ -400,6 +433,8 @@ class KioskCameraFragment : Fragment() {
                             binding.tvStatusBadgeB.setBackgroundColor(0xFFB71C1C.toInt())
                             binding.tvOverlayB.text = "Lỗi Camera B: ${msg ?: "Không mở được stream"}"
                             binding.tvOverlayB.visibility = View.VISIBLE
+                            binding.faceOverlayB.clear()
+                            binding.tvFaceStatusB.text = "⚠️ ML Kit: Tạm dừng do lỗi Camera B"
                         }
                     }
                 }
@@ -409,6 +444,9 @@ class KioskCameraFragment : Fragment() {
         camera.addPreviewDataCallBack(object : IPreviewDataCallBack {
             override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
                 frameCountB++
+                if (data != null) {
+                    processFaceDetectionFrame(data)
+                }
             }
         })
 
@@ -419,6 +457,60 @@ class KioskCameraFragment : Fragment() {
 
         camera.openCamera(binding.uvcSurfaceViewB, req)
         mCameraB = camera
+    }
+
+    private fun processFaceDetectionFrame(nv21Data: ByteArray) {
+        val detector = faceDetector ?: return
+        if (isProcessingFaceFrame.get()) {
+            return // Skip frame if detector is busy
+        }
+
+        val previewSize = mCameraB?.getPreviewSize()
+        val width = previewSize?.width ?: 640
+        val height = previewSize?.height ?: 480
+
+        if (width <= 0 || height <= 0) return
+
+        isProcessingFaceFrame.set(true)
+
+        try {
+            val frameBytes = nv21Data.clone()
+            val inputImage = InputImage.fromByteArray(
+                frameBytes,
+                width,
+                height,
+                0,
+                InputImage.IMAGE_FORMAT_NV21
+            )
+
+            detector.process(inputImage)
+                .addOnSuccessListener { faces ->
+                    faceDetectCount++
+                    activity?.runOnUiThread {
+                        if (_binding != null) {
+                            if (faces.isEmpty()) {
+                                binding.faceOverlayB.clear()
+                                binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
+                            } else {
+                                binding.faceOverlayB.setFaces(faces, width, height)
+                                binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
+                            }
+                        }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    activity?.runOnUiThread {
+                        if (_binding != null) {
+                            binding.tvFaceStatusB.text = "⚠️ ML Kit Lỗi: ${e.message}"
+                        }
+                    }
+                }
+                .addOnCompleteListener {
+                    isProcessingFaceFrame.set(false)
+                }
+        } catch (_: Exception) {
+            isProcessingFaceFrame.set(false)
+        }
     }
 
     private fun closeCameraA() {
@@ -440,6 +532,10 @@ class KioskCameraFragment : Fragment() {
                 appendLog("⏹️ Đã đóng Camera B.")
             }
             mCameraB = null
+            if (_binding != null) {
+                binding.faceOverlayB.clear()
+                binding.tvFaceStatusB.text = "👤 ML Kit: Camera B đã đóng"
+            }
         } catch (e: Exception) {
             appendLog("⚠️ Lỗi khi đóng Camera B: ${e.message}")
         }
@@ -598,6 +694,13 @@ class KioskCameraFragment : Fragment() {
 
         closeCameraA()
         closeCameraB()
+
+        try {
+            faceDetector?.close()
+            faceDetector = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         try {
             mMultiCameraClient?.unRegister()
