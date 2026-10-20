@@ -1,5 +1,6 @@
 package com.example.testcamera
 
+import android.graphics.Rect
 import android.hardware.usb.UsbDevice
 import android.os.Bundle
 import android.os.Environment
@@ -8,9 +9,14 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
+import com.example.testcamera.ml.FaceNetModel
+import com.example.testcamera.util.NV21ToBitmapConverter
 import com.example.testcamera.util.UsbDeviceInfo
 import com.example.testcamera.util.UsbDiagnosticHelper
 import com.google.mlkit.vision.common.InputImage
@@ -55,6 +61,14 @@ class KioskCameraFragment : Fragment() {
     private var faceDetectCount = 0
     private var faceDetectFps = 0
 
+    // Face Recognition (Phase 3)
+    private var faceNetModel: FaceNetModel? = null
+    private var latestDetectedBox: Rect? = null
+    private var latestNv21Bytes: ByteArray? = null
+    private var latestFrameWidth = 640
+    private var latestFrameHeight = 480
+    private var isAutoVerificationEnabled = false
+
     private var isLogPanelVisible = true
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -88,9 +102,10 @@ class KioskCameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk...")
+        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk & ML Kit...")
 
         initFaceDetector()
+        initFaceRecognitionModel()
         initMultiCameraClient()
         setupListeners()
 
@@ -111,6 +126,17 @@ class KioskCameraFragment : Fragment() {
         } catch (e: Exception) {
             appendLog("❌ Lỗi khởi tạo ML Kit Face Detector: ${e.message}")
             binding.tvFaceStatusB.text = "⚠️ ML Kit: Lỗi khởi tạo (${e.message})"
+        }
+    }
+
+    private fun initFaceRecognitionModel() {
+        try {
+            val ctx = context ?: return
+            faceNetModel = FaceNetModel(ctx)
+            updateRecognitionStatusUI()
+            appendLog("✅ Khởi tạo Face Recognition Model (MobileFaceNet) thành công.")
+        } catch (e: Exception) {
+            appendLog("⚠️ Khởi tạo Face Recognition Model: ${e.message}")
         }
     }
 
@@ -160,26 +186,19 @@ class KioskCameraFragment : Fragment() {
 
     private fun setupListeners() {
         // Panel A Buttons
-        binding.btnConnectA.setOnClickListener {
-            connectCameraA()
-        }
-        binding.btnStopA.setOnClickListener {
-            closeCameraA()
-        }
-        binding.btnCaptureA.setOnClickListener {
-            captureImageA()
-        }
+        binding.btnConnectA.setOnClickListener { connectCameraA() }
+        binding.btnStopA.setOnClickListener { closeCameraA() }
+        binding.btnCaptureA.setOnClickListener { captureImageA() }
 
         // Panel B Buttons
-        binding.btnConnectB.setOnClickListener {
-            connectCameraB()
-        }
-        binding.btnStopB.setOnClickListener {
-            closeCameraB()
-        }
-        binding.btnCaptureB.setOnClickListener {
-            captureImageB()
-        }
+        binding.btnConnectB.setOnClickListener { connectCameraB() }
+        binding.btnStopB.setOnClickListener { closeCameraB() }
+        binding.btnCaptureB.setOnClickListener { captureImageB() }
+
+        // Face Recognition Buttons
+        binding.btnRegisterFaceB.setOnClickListener { showRegisterFaceDialog() }
+        binding.btnVerifyFaceB.setOnClickListener { toggleAutoVerification() }
+        binding.btnClearFacesB.setOnClickListener { clearRegisteredFaceDatabase() }
 
         // Bottom Bar
         binding.btnRefreshUsb.setOnClickListener {
@@ -219,7 +238,6 @@ class KioskCameraFragment : Fragment() {
             }
         }
 
-        // Assign devices to Panel A and Panel B
         if (uvcDevices.isNotEmpty()) {
             assignedDeviceA = uvcDevices[0].device
             updateDeviceInfoA(uvcDevices[0])
@@ -462,7 +480,7 @@ class KioskCameraFragment : Fragment() {
     private fun processFaceDetectionFrame(nv21Data: ByteArray) {
         val detector = faceDetector ?: return
         if (isProcessingFaceFrame.get()) {
-            return // Skip frame if detector is busy
+            return
         }
 
         val previewSize = mCameraB?.getPreviewSize()
@@ -489,11 +507,23 @@ class KioskCameraFragment : Fragment() {
                     activity?.runOnUiThread {
                         if (_binding != null) {
                             if (faces.isEmpty()) {
+                                latestDetectedBox = null
+                                latestNv21Bytes = null
                                 binding.faceOverlayB.clear()
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
                             } else {
+                                val face = faces[0]
+                                latestDetectedBox = face.boundingBox
+                                latestNv21Bytes = frameBytes
+                                latestFrameWidth = width
+                                latestFrameHeight = height
+
                                 binding.faceOverlayB.setFaces(faces, width, height)
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
+
+                                if (isAutoVerificationEnabled && UserFaceRepository.getUserCount() > 0) {
+                                    performFaceVerification(frameBytes, width, height, face.boundingBox)
+                                }
                             }
                         }
                     }
@@ -510,6 +540,154 @@ class KioskCameraFragment : Fragment() {
                 }
         } catch (_: Exception) {
             isProcessingFaceFrame.set(false)
+        }
+    }
+
+    private fun showRegisterFaceDialog() {
+        val box = latestDetectedBox
+        val nv21 = latestNv21Bytes
+        if (box == null || nv21 == null) {
+            Toast.makeText(context, "Vui lòng đứng trước Camera B để nhận diện khuôn mặt!", Toast.LENGTH_SHORT).show()
+            appendLog("⚠️ Đăng ký thất bại: Không tìm thấy khuôn mặt trong khung hình.")
+            return
+        }
+
+        val ctx = context ?: return
+        val inputName = EditText(ctx).apply {
+            hint = "Nhập tên người dùng (VD: Nguyễn Văn A)"
+            setPadding(32, 24, 32, 24)
+        }
+
+        AlertDialog.Builder(ctx)
+            .setTitle("📝 Đăng ký Khuôn mặt Mới")
+            .setMessage("Hệ thống sẽ trích xuất vector đặc trưng 192 chiều (MobileFaceNet) cho người dùng này:")
+            .setView(inputName)
+            .setPositiveButton("Lưu Đăng Ký") { _, _ ->
+                val name = inputName.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    registerFaceForUser(name, nv21, latestFrameWidth, latestFrameHeight, box)
+                } else {
+                    Toast.makeText(ctx, "Tên người dùng không được để trống!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Hủy", null)
+            .show()
+    }
+
+    private fun registerFaceForUser(
+        userName: String,
+        nv21: ByteArray,
+        width: Int,
+        height: Int,
+        box: Rect
+    ) {
+        val model = faceNetModel
+        if (model == null) {
+            Toast.makeText(context, "Model Face Recognition chưa sẵn sàng!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
+            if (croppedFace == null) {
+                Toast.makeText(context, "Lỗi trích xuất vùng ảnh khuôn mặt!", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val embedding = model.extractEmbedding(croppedFace)
+            croppedFace.recycle()
+
+            val registeredUser = UserFaceRepository.registerUser(userName, embedding)
+            appendLog("✅ Đã đăng ký thành công: ${registeredUser.name} [ID: ${registeredUser.id}]")
+            Toast.makeText(context, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
+
+            updateRecognitionStatusUI()
+        } catch (e: Exception) {
+            appendLog("❌ Lỗi đăng ký khuôn mặt: ${e.message}")
+            Toast.makeText(context, "Lỗi đăng ký: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun toggleAutoVerification() {
+        if (UserFaceRepository.getUserCount() == 0) {
+            Toast.makeText(context, "Chưa có mẫu khuôn mặt nào! Hãy nhấn '📝 Đăng ký' trước.", Toast.LENGTH_SHORT).show()
+            appendLog("⚠️ So khớp thất bại: Cơ sở dữ liệu đăng ký đang trống.")
+            return
+        }
+
+        isAutoVerificationEnabled = !isAutoVerificationEnabled
+        if (isAutoVerificationEnabled) {
+            binding.btnVerifyFaceB.text = "🔍 Tắt So khớp"
+            appendLog("🔍 Bật chế độ tự động So khớp khuôn mặt thời gian thực.")
+            Toast.makeText(context, "Bật tự động So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
+
+            val box = latestDetectedBox
+            val nv21 = latestNv21Bytes
+            if (box != null && nv21 != null) {
+                performFaceVerification(nv21, latestFrameWidth, latestFrameHeight, box)
+            }
+        } else {
+            binding.btnVerifyFaceB.text = "🔍 So khớp"
+            appendLog("🔍 Tắt chế độ tự động So khớp.")
+            Toast.makeText(context, "Tắt So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
+            updateRecognitionStatusUI()
+        }
+    }
+
+    private fun performFaceVerification(
+        nv21: ByteArray,
+        width: Int,
+        height: Int,
+        box: Rect
+    ) {
+        val model = faceNetModel ?: return
+        val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box) ?: return
+
+        try {
+            val liveEmbedding = model.extractEmbedding(croppedFace)
+            croppedFace.recycle()
+
+            val matchResult = UserFaceRepository.findBestMatch(liveEmbedding, threshold = 0.65f)
+
+            if (matchResult != null) {
+                val (matchedUser, similarity) = matchResult
+                val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
+                val resultText = "✅ KHỚP: ${matchedUser.name} (Độ tương đồng: $percentStr)"
+                binding.tvRecognitionResultB.text = resultText
+                binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+            } else {
+                binding.tvRecognitionResultB.text = "❌ Không trùng khớp với người dùng nào trong DB"
+                binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
+            }
+        } catch (e: Exception) {
+            binding.tvRecognitionResultB.text = "⚠️ Lỗi so khớp: ${e.message}"
+        }
+    }
+
+    private fun clearRegisteredFaceDatabase() {
+        val count = UserFaceRepository.getUserCount()
+        if (count == 0) {
+            Toast.makeText(context, "Cơ sở dữ liệu vốn đã trống!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        UserFaceRepository.clearAllUsers()
+        isAutoVerificationEnabled = false
+        binding.btnVerifyFaceB.text = "🔍 So khớp"
+        appendLog("🗑️ Đã xóa sạch $count mẫu khuôn mặt đã đăng ký.")
+        Toast.makeText(context, "Đã xóa sạch cơ sở dữ liệu đăng ký!", Toast.LENGTH_SHORT).show()
+        updateRecognitionStatusUI()
+    }
+
+    private fun updateRecognitionStatusUI() {
+        if (_binding == null) return
+        val count = UserFaceRepository.getUserCount()
+        if (count == 0) {
+            binding.tvRecognitionResultB.text = "🆔 Nhận diện: Chưa có dữ liệu đăng ký"
+            binding.tvRecognitionResultB.setTextColor(0xFFFFB74D.toInt())
+        } else {
+            binding.tvRecognitionResultB.text = "🆔 Đã đăng ký $count mẫu | Chờ so khớp..."
+            binding.tvRecognitionResultB.setTextColor(0xFF29B6F6.toInt())
         }
     }
 
@@ -535,6 +713,7 @@ class KioskCameraFragment : Fragment() {
             if (_binding != null) {
                 binding.faceOverlayB.clear()
                 binding.tvFaceStatusB.text = "👤 ML Kit: Camera B đã đóng"
+                updateRecognitionStatusUI()
             }
         } catch (e: Exception) {
             appendLog("⚠️ Lỗi khi đóng Camera B: ${e.message}")
@@ -694,6 +873,13 @@ class KioskCameraFragment : Fragment() {
 
         closeCameraA()
         closeCameraB()
+
+        try {
+            faceNetModel?.close()
+            faceNetModel = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         try {
             faceDetector?.close()

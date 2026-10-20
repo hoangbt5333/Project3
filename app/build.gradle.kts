@@ -34,6 +34,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -53,6 +59,11 @@ dependencies {
 
     // Google ML Kit Face Detection
     implementation("com.google.mlkit:face-detection:16.1.7")
+
+    // TensorFlow Lite for Face Recognition (MobileFaceNet)
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+
+
 }
 
 configurations.all {

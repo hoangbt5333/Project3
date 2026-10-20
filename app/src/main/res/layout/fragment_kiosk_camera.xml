@@ -282,12 +282,23 @@
                 android:textStyle="bold"
                 android:fontFamily="monospace" />
 
-            <!-- Control Buttons B -->
+            <!-- Face Recognition Result Status -->
+            <TextView
+                android:id="@+id/tvRecognitionResultB"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🆔 Nhận diện: Chưa có dữ liệu đăng ký"
+                android:textColor="#FFB74D"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+            <!-- Control Buttons B - Row 1 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingTop="4dp">
+                android:paddingTop="2dp">
 
                 <Button
                     android:id="@+id/btnConnectB"
@@ -319,6 +330,48 @@
                     android:layout_weight="1"
                     android:paddingHorizontal="4dp"
                     android:text="📸 Chụp"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <!-- Control Buttons B - Row 2 (Face Recognition) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="2dp">
+
+                <Button
+                    android:id="@+id/btnRegisterFaceB"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="2dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="📝 Đăng ký"
+                    android:textSize="10sp" />
+
+                <Button
+                    android:id="@+id/btnVerifyFaceB"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="2dp"
+                    android:paddingHorizontal="4dp"
+                    android:text="🔍 So khớp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="10sp" />
+
+                <Button
+                    android:id="@+id/btnClearFacesB"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:paddingHorizontal="4dp"
+                    android:text="🗑️ Xóa DB"
+                    android:textColor="#FF5252"
                     android:textSize="10sp" />
             </LinearLayout>
         </LinearLayout>
