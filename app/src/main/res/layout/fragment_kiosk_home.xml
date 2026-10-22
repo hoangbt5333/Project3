@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#121212"
+    android:padding="24dp">
+
+    <!-- Header Icon & Branding -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🏫"
+        android:textSize="64sp"
+        android:paddingBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="HỆ THỐNG SMART KIOSK SINH VIÊN"
+        android:textColor="#00E676"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:paddingBottom="12dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Vui lòng chạm nút bên dưới hoặc nhìn vào camera để xác thực danh tính"
+        android:textColor="#CCCCCC"
+        android:textSize="14sp"
+        android:textAlignment="center"
+        android:paddingBottom="32dp" />
+
+    <!-- Start Action Button -->
+    <Button
+        android:id="@+id/btnStartAuthentication"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="32dp"
+        android:paddingVertical="16dp"
+        android:text="📸 BẮT ĐẦU XÁC THỰC KHUÔN MẶT"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <!-- Status Badge -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:background="#222222"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="🟢 Hệ thống sẵn sàng kết nối Camera UVC &amp; ML Kit"
+        android:textColor="#888888"
+        android:textSize="12sp" />
+
+</LinearLayout>

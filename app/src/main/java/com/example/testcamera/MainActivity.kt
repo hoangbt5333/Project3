@@ -15,6 +15,8 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import com.example.testcamera.util.UsbDiagnosticHelper
 
 class MainActivity : AppCompatActivity() {
@@ -67,6 +69,24 @@ class MainActivity : AppCompatActivity() {
 
         checkAndRequestPermissions()
         registerUsbReceiver()
+
+        if (savedInstanceState == null) {
+            navigateToHome()
+        }
+    }
+
+    fun navigateToFragment(fragment: Fragment, addToBackStack: Boolean = false) {
+        val transaction = supportFragmentManager.beginTransaction()
+            .replace(R.id.fragmentContainer, fragment)
+        if (addToBackStack) {
+            transaction.addToBackStack(null)
+        }
+        transaction.commitAllowingStateLoss()
+    }
+
+    fun navigateToHome() {
+        supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+        navigateToFragment(KioskHomeFragment(), addToBackStack = false)
     }
 
     private fun checkAndRequestPermissions() {

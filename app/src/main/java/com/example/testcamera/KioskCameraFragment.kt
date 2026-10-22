@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.KioskSessionManager
 import com.example.testcamera.data.Student
 import com.example.testcamera.data.StudentRepository
 import com.example.testcamera.data.UserFaceModel
@@ -77,6 +78,7 @@ class KioskCameraFragment : Fragment() {
     private var latestFrameWidth = 640
     private var latestFrameHeight = 480
     private var isAutoVerificationEnabled = false
+    private var isNavigatingToProfile = false
 
     private var isLogPanelVisible = true
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -115,6 +117,7 @@ class KioskCameraFragment : Fragment() {
 
         val ctx = requireContext()
         UserFaceRepository.init(ctx)
+        isNavigatingToProfile = false
 
         initFaceDetector()
         initFaceRecognitionModel()
@@ -491,7 +494,7 @@ class KioskCameraFragment : Fragment() {
 
     private fun processFaceDetectionFrame(nv21Data: ByteArray) {
         val detector = faceDetector ?: return
-        if (isProcessingFaceFrame.get()) {
+        if (isProcessingFaceFrame.get() || isNavigatingToProfile) {
             return
         }
 
@@ -522,7 +525,7 @@ class KioskCameraFragment : Fragment() {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
                                 binding.faceOverlayB.clear()
-                                binding.tvFaceStatusB.text = "👤 ML Kit: Không thấy khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
+                                binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
                             } else {
                                 val face = faces[0]
                                 latestDetectedBox = face.boundingBox
@@ -534,7 +537,7 @@ class KioskCameraFragment : Fragment() {
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
 
                                 val ctx = context
-                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0) {
+                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile) {
                                     performFaceVerification(frameBytes, width, height, face.boundingBox)
                                 }
                             }
@@ -707,8 +710,8 @@ class KioskCameraFragment : Fragment() {
 
             AlertDialog.Builder(ctx)
                 .setTitle("🚨 Cảnh Báo Trùng Khuôn Mặt")
-                .setMessage("Khuôn mặt này trùng khớp $percentStr với sinh viên '${dupName}' (MSSV: ${dupUser.studentId}) đã đăng ký!\nBạn muốn xử lý thế nào?")
-                .setPositiveButton("Cập nhật cho '${dupName}'") { _, _ ->
+                .setMessage("Khuôn mặt này trùng khớp $percentStr với sinh viên '$dupName' (MSSV: ${dupUser.studentId}) đã đăng ký!\nBạn muốn xử lý thế nào?")
+                .setPositiveButton("Cập nhật cho '$dupName'") { _, _ ->
                     val updatedUser = UserFaceModel(dupUser.studentId, dupName, embedding)
                     UserFaceRepository.updateStudentFace(ctx, updatedUser)
                     appendLog("🔄 Đã cập nhật khuôn mặt cho sinh viên cũ: $dupName (${dupUser.studentId})")
@@ -766,6 +769,8 @@ class KioskCameraFragment : Fragment() {
         height: Int,
         box: Rect
     ) {
+        if (isNavigatingToProfile) return
+
         val model = faceNetModel ?: return
         val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box) ?: return
 
@@ -781,9 +786,23 @@ class KioskCameraFragment : Fragment() {
                 val student = StudentRepository.findStudentById(matchedUser.studentId)
 
                 if (student != null) {
-                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${student.studentId} | Họ tên: ${student.fullName}\nLớp: ${student.className} | Khoa: ${student.faculty} | Độ tương đồng: $percentStr"
+                    isNavigatingToProfile = true
+                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${student.studentId} | Họ tên: ${student.fullName}\nLớp: ${student.className} | Khoa: ${student.faculty} | Tương đồng: $percentStr"
                     binding.tvRecognitionResultB.text = resultText
                     binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+
+                    // Start session and navigate to Student Profile Page
+                    KioskSessionManager.startSession(student)
+                    appendLog("✅ Tự động chuyển sang Trang cá nhân cho sinh viên: ${student.fullName} (${student.studentId})")
+
+                    mainHandler.postDelayed({
+                        activity?.runOnUiThread {
+                            if (_binding != null) {
+                                isAutoVerificationEnabled = false
+                                (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
+                            }
+                        }
+                    }, 500)
                 } else {
                     val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${matchedUser.studentId} | Tên: ${matchedUser.name} | Độ tương đồng: $percentStr"
                     binding.tvRecognitionResultB.text = resultText
