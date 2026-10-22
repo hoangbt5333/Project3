@@ -1,5 +1,6 @@
 package com.example.testcamera
 
+import android.content.Context
 import android.graphics.Rect
 import android.hardware.usb.UsbDevice
 import android.os.Bundle
@@ -13,6 +14,7 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.UserFaceModel
 import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
 import com.example.testcamera.ml.FaceNetModel
@@ -102,7 +104,10 @@ class KioskCameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk & ML Kit...")
+        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk & Persistent Storage...")
+
+        val ctx = requireContext()
+        UserFaceRepository.init(ctx)
 
         initFaceDetector()
         initFaceRecognitionModel()
@@ -195,7 +200,7 @@ class KioskCameraFragment : Fragment() {
         binding.btnStopB.setOnClickListener { closeCameraB() }
         binding.btnCaptureB.setOnClickListener { captureImageB() }
 
-        // Face Recognition Buttons
+        // Shared Face Recognition Buttons
         binding.btnRegisterFaceB.setOnClickListener { showRegisterFaceDialog() }
         binding.btnVerifyFaceB.setOnClickListener { toggleAutoVerification() }
         binding.btnClearFacesB.setOnClickListener { clearRegisteredFaceDatabase() }
@@ -521,7 +526,8 @@ class KioskCameraFragment : Fragment() {
                                 binding.faceOverlayB.setFaces(faces, width, height)
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
 
-                                if (isAutoVerificationEnabled && UserFaceRepository.getUserCount() > 0) {
+                                val ctx = context
+                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0) {
                                     performFaceVerification(frameBytes, width, height, face.boundingBox)
                                 }
                             }
@@ -554,18 +560,18 @@ class KioskCameraFragment : Fragment() {
 
         val ctx = context ?: return
         val inputName = EditText(ctx).apply {
-            hint = "Nhập tên người dùng (VD: Nguyễn Văn A)"
+            hint = "Nhập tên người dùng / Mã SV (VD: Nguyễn Văn A)"
             setPadding(32, 24, 32, 24)
         }
 
         AlertDialog.Builder(ctx)
             .setTitle("📝 Đăng ký Khuôn mặt Mới")
-            .setMessage("Hệ thống sẽ trích xuất vector đặc trưng 192 chiều (MobileFaceNet) cho người dùng này:")
+            .setMessage("Nhập mã định danh / tên người dùng:")
             .setView(inputName)
-            .setPositiveButton("Lưu Đăng Ký") { _, _ ->
+            .setPositiveButton("Tiếp tục") { _, _ ->
                 val name = inputName.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    registerFaceForUser(name, nv21, latestFrameWidth, latestFrameHeight, box)
+                    checkAndProcessRegistration(ctx, name, nv21, latestFrameWidth, latestFrameHeight, box)
                 } else {
                     Toast.makeText(ctx, "Tên người dùng không được để trống!", Toast.LENGTH_SHORT).show()
                 }
@@ -574,7 +580,8 @@ class KioskCameraFragment : Fragment() {
             .show()
     }
 
-    private fun registerFaceForUser(
+    private fun checkAndProcessRegistration(
+        ctx: Context,
         userName: String,
         nv21: ByteArray,
         width: Int,
@@ -583,34 +590,75 @@ class KioskCameraFragment : Fragment() {
     ) {
         val model = faceNetModel
         if (model == null) {
-            Toast.makeText(context, "Model Face Recognition chưa sẵn sàng!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Model Face Recognition chưa sẵn sàng!", Toast.LENGTH_SHORT).show()
             return
         }
 
-        try {
-            val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
-            if (croppedFace == null) {
-                Toast.makeText(context, "Lỗi trích xuất vùng ảnh khuôn mặt!", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val embedding = model.extractEmbedding(croppedFace)
-            croppedFace.recycle()
-
-            val registeredUser = UserFaceRepository.registerUser(userName, embedding)
-            appendLog("✅ Đã đăng ký thành công: ${registeredUser.name} [ID: ${registeredUser.id}]")
-            Toast.makeText(context, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
-
-            updateRecognitionStatusUI()
-        } catch (e: Exception) {
-            appendLog("❌ Lỗi đăng ký khuôn mặt: ${e.message}")
-            Toast.makeText(context, "Lỗi đăng ký: ${e.message}", Toast.LENGTH_LONG).show()
+        val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
+        if (croppedFace == null) {
+            Toast.makeText(ctx, "Lỗi trích xuất vùng ảnh khuôn mặt!", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        val embedding = model.extractEmbedding(croppedFace)
+        croppedFace.recycle()
+
+        // 1. Check duplicate ID / Name
+        val existingNameUser = UserFaceRepository.findUserByName(userName)
+        if (existingNameUser != null) {
+            AlertDialog.Builder(ctx)
+                .setTitle("⚠️ Trùng Tên / Mã Sinh Viên")
+                .setMessage("Tên/Mã '${userName}' đã tồn tại trong cơ sở dữ liệu!\nBạn có muốn CẬP NHẬT LẠI khuôn mặt mới cho người dùng này không?")
+                .setPositiveButton("Cập nhật lại") { _, _ ->
+                    val updatedUser = UserFaceModel(existingNameUser.id, userName, embedding)
+                    UserFaceRepository.updateUser(ctx, updatedUser)
+                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho: $userName")
+                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho $userName!", Toast.LENGTH_SHORT).show()
+                    updateRecognitionStatusUI()
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
+            return
+        }
+
+        // 2. Check duplicate Face Embedding (threshold 0.72)
+        val duplicateFaceMatch = UserFaceRepository.checkDuplicateFace(embedding, duplicateThreshold = 0.72f)
+        if (duplicateFaceMatch != null) {
+            val (dupUser, similarity) = duplicateFaceMatch
+            val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
+
+            AlertDialog.Builder(ctx)
+                .setTitle("🚨 Cảnh Báo Trùng Khuôn Mặt")
+                .setMessage("Khuôn mặt này trùng khớp $percentStr với người dùng '${dupUser.name}' đã đăng ký trước đó!\nBạn muốn xử lý thế nào?")
+                .setPositiveButton("Cập nhật cho '${dupUser.name}'") { _, _ ->
+                    val updatedUser = UserFaceModel(dupUser.id, dupUser.name, embedding)
+                    UserFaceRepository.updateUser(ctx, updatedUser)
+                    appendLog("🔄 Đã cập nhật lại khuôn mặt cho người dùng cũ: ${dupUser.name}")
+                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${dupUser.name}!", Toast.LENGTH_SHORT).show()
+                    updateRecognitionStatusUI()
+                }
+                .setNeutralButton("Vẫn đăng ký mới tên '$userName'") { _, _ ->
+                    val registeredUser = UserFaceRepository.registerUser(ctx, userName, embedding)
+                    appendLog("✅ Đã đăng ký mới: ${registeredUser.name} [ID: ${registeredUser.id}]")
+                    Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
+                    updateRecognitionStatusUI()
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
+            return
+        }
+
+        // 3. Normal registration
+        val registeredUser = UserFaceRepository.registerUser(ctx, userName, embedding)
+        appendLog("✅ Đã đăng ký thành công: ${registeredUser.name} [ID: ${registeredUser.id}]")
+        Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
+        updateRecognitionStatusUI()
     }
 
     private fun toggleAutoVerification() {
-        if (UserFaceRepository.getUserCount() == 0) {
-            Toast.makeText(context, "Chưa có mẫu khuôn mặt nào! Hãy nhấn '📝 Đăng ký' trước.", Toast.LENGTH_SHORT).show()
+        val ctx = context ?: return
+        if (UserFaceRepository.getUserCount(ctx) == 0) {
+            Toast.makeText(ctx, "Chưa có mẫu khuôn mặt nào! Hãy nhấn '📝 Đăng ký' trước.", Toast.LENGTH_SHORT).show()
             appendLog("⚠️ So khớp thất bại: Cơ sở dữ liệu đăng ký đang trống.")
             return
         }
@@ -619,7 +667,7 @@ class KioskCameraFragment : Fragment() {
         if (isAutoVerificationEnabled) {
             binding.btnVerifyFaceB.text = "🔍 Tắt So khớp"
             appendLog("🔍 Bật chế độ tự động So khớp khuôn mặt thời gian thực.")
-            Toast.makeText(context, "Bật tự động So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Bật tự động So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
 
             val box = latestDetectedBox
             val nv21 = latestNv21Bytes
@@ -629,7 +677,7 @@ class KioskCameraFragment : Fragment() {
         } else {
             binding.btnVerifyFaceB.text = "🔍 So khớp"
             appendLog("🔍 Tắt chế độ tự động So khớp.")
-            Toast.makeText(context, "Tắt So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Tắt So khớp khuôn mặt", Toast.LENGTH_SHORT).show()
             updateRecognitionStatusUI()
         }
     }
@@ -665,23 +713,25 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun clearRegisteredFaceDatabase() {
-        val count = UserFaceRepository.getUserCount()
+        val ctx = context ?: return
+        val count = UserFaceRepository.getUserCount(ctx)
         if (count == 0) {
-            Toast.makeText(context, "Cơ sở dữ liệu vốn đã trống!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Cơ sở dữ liệu vốn đã trống!", Toast.LENGTH_SHORT).show()
             return
         }
 
-        UserFaceRepository.clearAllUsers()
+        UserFaceRepository.clearAllUsers(ctx)
         isAutoVerificationEnabled = false
         binding.btnVerifyFaceB.text = "🔍 So khớp"
         appendLog("🗑️ Đã xóa sạch $count mẫu khuôn mặt đã đăng ký.")
-        Toast.makeText(context, "Đã xóa sạch cơ sở dữ liệu đăng ký!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, "Đã xóa sạch cơ sở dữ liệu đăng ký!", Toast.LENGTH_SHORT).show()
         updateRecognitionStatusUI()
     }
 
     private fun updateRecognitionStatusUI() {
         if (_binding == null) return
-        val count = UserFaceRepository.getUserCount()
+        val ctx = context
+        val count = if (ctx != null) UserFaceRepository.getUserCount(ctx) else 0
         if (count == 0) {
             binding.tvRecognitionResultB.text = "🆔 Nhận diện: Chưa có dữ liệu đăng ký"
             binding.tvRecognitionResultB.setTextColor(0xFFFFB74D.toInt())

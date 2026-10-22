@@ -12,7 +12,7 @@
         android:layout_height="wrap_content"
         android:background="#1E1E1E"
         android:orientation="horizontal"
-        android:padding="10dp"
+        android:padding="8dp"
         android:gravity="center_vertical">
 
         <TextView
@@ -37,7 +37,7 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- Dual Camera Preview Area -->
+    <!-- Dual Camera Preview Area (100% Symmetric Panel A & Panel B) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -45,7 +45,7 @@
         android:orientation="horizontal"
         android:baselineAligned="false">
 
-        <!-- ==================== CAMERA A PANEL ==================== -->
+        <!-- ==================== CAMERA A PANEL (IR / Thermal) ==================== -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
@@ -61,7 +61,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingBottom="4dp">
+                android:paddingBottom="2dp">
 
                 <TextView
                     android:id="@+id/tvTitleA"
@@ -70,7 +70,7 @@
                     android:layout_weight="1"
                     android:text="📷 Camera A (Thermal / Cam 1)"
                     android:textColor="#4CAF50"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -103,7 +103,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginVertical="4dp"
+                android:layout_marginVertical="2dp"
                 android:background="#000000">
 
                 <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
@@ -125,7 +125,7 @@
                     android:textSize="12sp" />
             </FrameLayout>
 
-            <!-- Stats Bar A (Resolution & FPS) -->
+            <!-- Stats Bar A -->
             <TextView
                 android:id="@+id/tvStatsA"
                 android:layout_width="match_parent"
@@ -140,7 +140,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingTop="4dp">
+                android:paddingTop="2dp">
 
                 <Button
                     android:id="@+id/btnConnectA"
@@ -149,7 +149,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="▶️ Mở"
                     android:textSize="10sp" />
 
@@ -160,7 +160,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="⏹️ Đóng"
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
@@ -170,13 +170,13 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="📸 Chụp"
                     android:textSize="10sp" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ==================== CAMERA B PANEL ==================== -->
+        <!-- ==================== CAMERA B PANEL (RGB) ==================== -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
@@ -192,7 +192,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingBottom="4dp">
+                android:paddingBottom="2dp">
 
                 <TextView
                     android:id="@+id/tvTitleB"
@@ -201,7 +201,7 @@
                     android:layout_weight="1"
                     android:text="📷 Camera B (RGB / Cam 2)"
                     android:textColor="#2196F3"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -234,7 +234,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginVertical="4dp"
+                android:layout_marginVertical="2dp"
                 android:background="#000000">
 
                 <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
@@ -261,7 +261,7 @@
                     android:textSize="12sp" />
             </FrameLayout>
 
-            <!-- Stats Bar B (Resolution & FPS) -->
+            <!-- Stats Bar B -->
             <TextView
                 android:id="@+id/tvStatsB"
                 android:layout_width="match_parent"
@@ -271,29 +271,7 @@
                 android:textSize="10sp"
                 android:fontFamily="monospace" />
 
-            <!-- ML Kit Face Detection Status -->
-            <TextView
-                android:id="@+id/tvFaceStatusB"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="👤 ML Kit: Khởi tạo..."
-                android:textColor="#00E676"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
-
-            <!-- Face Recognition Result Status -->
-            <TextView
-                android:id="@+id/tvRecognitionResultB"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🆔 Nhận diện: Chưa có dữ liệu đăng ký"
-                android:textColor="#FFB74D"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
-
-            <!-- Control Buttons B - Row 1 -->
+            <!-- Control Buttons B -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -307,7 +285,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="▶️ Mở"
                     android:textSize="10sp" />
 
@@ -318,7 +296,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="⏹️ Đóng"
                     android:textColor="#FFFFFF"
                     android:textSize="10sp" />
@@ -328,62 +306,98 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:paddingHorizontal="4dp"
+                    android:paddingHorizontal="2dp"
                     android:text="📸 Chụp"
-                    android:textSize="10sp" />
-            </LinearLayout>
-
-            <!-- Control Buttons B - Row 2 (Face Recognition) -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingTop="2dp">
-
-                <Button
-                    android:id="@+id/btnRegisterFaceB"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
-                    android:text="📝 Đăng ký"
-                    android:textSize="10sp" />
-
-                <Button
-                    android:id="@+id/btnVerifyFaceB"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="4dp"
-                    android:text="🔍 So khớp"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp" />
-
-                <Button
-                    android:id="@+id/btnClearFacesB"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:paddingHorizontal="4dp"
-                    android:text="🗑️ Xóa DB"
-                    android:textColor="#FF5252"
                     android:textSize="10sp" />
             </LinearLayout>
         </LinearLayout>
 
     </LinearLayout>
 
+    <!-- ==================== SHARED RECOGNITION TOOLBAR ==================== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#1E1E1E"
+        android:orientation="vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="4dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvFaceStatusB"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="👤 ML Kit: Khởi tạo..."
+                android:textColor="#00E676"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/tvRecognitionResultB"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🆔 Nhận diện: Chưa có dữ liệu"
+                android:textColor="#FFB74D"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+        </LinearLayout>
+
+        <!-- Recognition Actions Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="4dp">
+
+            <Button
+                android:id="@+id/btnRegisterFaceB"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="📝 Đăng ký Khuôn mặt"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnVerifyFaceB"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="🔍 So khớp"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnClearFacesB"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🗑️ Xóa CSDL"
+                android:textColor="#FF5252"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- Bottom Collapsible Diagnostic Log Console -->
     <ScrollView
         android:id="@+id/scrollDiagnosticPanel"
         android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:background="#181818"
+        android:layout_height="100dp"
+        android:background="#141414"
         android:padding="6dp">
 
         <LinearLayout
