@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#1E1E1E">
+
+    <!-- Header Title -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🎓 Chọn Sinh viên Đăng ký Khuôn mặt"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingBottom="12dp" />
+
+    <!-- Search Input -->
+    <EditText
+        android:id="@+id/etSearchStudent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="🔍 Tìm kiếm theo MSSV, Họ tên, Lớp..."
+        android:textColor="#FFFFFF"
+        android:textColorHint="#888888"
+        android:textSize="13sp"
+        android:background="#2C2C2C"
+        android:padding="10dp"
+        android:maxLines="1"
+        android:inputType="text" />
+
+    <!-- Student List Scroll Area -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Danh sách sinh viên mẫu:"
+        android:textColor="#AAAAAA"
+        android:textSize="11sp"
+        android:paddingTop="10dp"
+        android:paddingBottom="4dp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="160dp"
+        android:background="#141414"
+        android:padding="4dp">
+
+        <LinearLayout
+            android:id="@+id/containerStudentList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Selected Student Profile Details Card -->
+    <LinearLayout
+        android:id="@+id/cardSelectedStudentDetails"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="#282828"
+        android:orientation="vertical"
+        android:padding="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📋 Hồ sơ sinh viên đã chọn:"
+            android:textColor="#FFB74D"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <TextView
+            android:id="@+id/tvSelectedStudentId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mã SV: --"
+            android:textColor="#00E676"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvSelectedStudentName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Họ tên: --"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvSelectedStudentClass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Lớp: -- | Khoa: --"
+            android:textColor="#CCCCCC"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tvSelectedStudentEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Email: --"
+            android:textColor="#29B6F6"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+</LinearLayout>

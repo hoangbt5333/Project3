@@ -1,19 +1,26 @@
 package com.example.testcamera
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Rect
 import android.hardware.usb.UsbDevice
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.Student
+import com.example.testcamera.data.StudentRepository
 import com.example.testcamera.data.UserFaceModel
 import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
@@ -63,7 +70,7 @@ class KioskCameraFragment : Fragment() {
     private var faceDetectCount = 0
     private var faceDetectFps = 0
 
-    // Face Recognition (Phase 3)
+    // Face Recognition (Phase 3 & 4)
     private var faceNetModel: FaceNetModel? = null
     private var latestDetectedBox: Rect? = null
     private var latestNv21Bytes: ByteArray? = null
@@ -104,7 +111,7 @@ class KioskCameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk & Persistent Storage...")
+        appendLog("🚀 Khởi tạo Fragment Dual Camera Kiosk & Student DB...")
 
         val ctx = requireContext()
         UserFaceRepository.init(ctx)
@@ -200,8 +207,8 @@ class KioskCameraFragment : Fragment() {
         binding.btnStopB.setOnClickListener { closeCameraB() }
         binding.btnCaptureB.setOnClickListener { captureImageB() }
 
-        // Shared Face Recognition Buttons
-        binding.btnRegisterFaceB.setOnClickListener { showRegisterFaceDialog() }
+        // Shared Face Recognition & Student Registration Buttons
+        binding.btnRegisterFaceB.setOnClickListener { showStudentPickerRegistrationDialog() }
         binding.btnVerifyFaceB.setOnClickListener { toggleAutoVerification() }
         binding.btnClearFacesB.setOnClickListener { clearRegisteredFaceDatabase() }
 
@@ -515,7 +522,7 @@ class KioskCameraFragment : Fragment() {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
                                 binding.faceOverlayB.clear()
-                                binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
+                                binding.tvFaceStatusB.text = "👤 ML Kit: Không thấy khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
                             } else {
                                 val face = faces[0]
                                 latestDetectedBox = face.boundingBox
@@ -549,7 +556,7 @@ class KioskCameraFragment : Fragment() {
         }
     }
 
-    private fun showRegisterFaceDialog() {
+    private fun showStudentPickerRegistrationDialog() {
         val box = latestDetectedBox
         val nv21 = latestNv21Bytes
         if (box == null || nv21 == null) {
@@ -559,30 +566,99 @@ class KioskCameraFragment : Fragment() {
         }
 
         val ctx = context ?: return
-        val inputName = EditText(ctx).apply {
-            hint = "Nhập tên người dùng / Mã SV (VD: Nguyễn Văn A)"
-            setPadding(32, 24, 32, 24)
+        val dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_student_picker, null)
+
+        val etSearch = dialogView.findViewById<EditText>(R.id.etSearchStudent)
+        val containerList = dialogView.findViewById<LinearLayout>(R.id.containerStudentList)
+        val cardDetails = dialogView.findViewById<LinearLayout>(R.id.cardSelectedStudentDetails)
+        val tvId = dialogView.findViewById<TextView>(R.id.tvSelectedStudentId)
+        val tvName = dialogView.findViewById<TextView>(R.id.tvSelectedStudentName)
+        val tvClass = dialogView.findViewById<TextView>(R.id.tvSelectedStudentClass)
+        val tvEmail = dialogView.findViewById<TextView>(R.id.tvSelectedStudentEmail)
+
+        var selectedStudent: Student? = null
+
+        fun renderStudentList(students: List<Student>) {
+            containerList.removeAllViews()
+            if (students.isEmpty()) {
+                val emptyTv = TextView(ctx).apply {
+                    text = "Không tìm thấy sinh viên nào khớp từ khóa"
+                    setTextColor(0xFFAAAAAA.toInt())
+                    setPadding(16, 16, 16, 16)
+                    textSize = 12f
+                }
+                containerList.addView(emptyTv)
+                return
+            }
+
+            for (st in students) {
+                val registeredFace = UserFaceRepository.findUserByStudentId(st.studentId)
+                val isReg = registeredFace != null
+
+                val itemView = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(16, 12, 16, 12)
+                    setBackgroundColor(if (selectedStudent?.studentId == st.studentId) 0xFF333333.toInt() else Color.TRANSPARENT)
+
+                    val titleTv = TextView(ctx).apply {
+                        text = "MSSV: ${st.studentId} - ${st.fullName} ${if (isReg) "✅ (Đã đăng ký)" else ""}"
+                        setTextColor(if (isReg) 0xFF00E676.toInt() else Color.WHITE)
+                        textSize = 12f
+                        paint.isFakeBoldText = true
+                    }
+
+                    val subTv = TextView(ctx).apply {
+                        text = "Lớp: ${st.className} | Khoa: ${st.faculty}"
+                        setTextColor(0xFFBBBBBB.toInt())
+                        textSize = 11f
+                    }
+
+                    addView(titleTv)
+                    addView(subTv)
+
+                    setOnClickListener {
+                        selectedStudent = st
+                        renderStudentList(students)
+
+                        cardDetails.visibility = View.VISIBLE
+                        tvId.text = "Mã SV: ${st.studentId} ${if (isReg) "(Đã có dữ liệu khuôn mặt)" else ""}"
+                        tvName.text = "Họ tên: ${st.fullName}"
+                        tvClass.text = "Lớp: ${st.className} | Khoa: ${st.faculty}"
+                        tvEmail.text = "Email: ${st.email}"
+                    }
+                }
+                containerList.addView(itemView)
+            }
         }
 
+        renderStudentList(StudentRepository.getAllStudents())
+
+        etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString() ?: ""
+                renderStudentList(StudentRepository.searchStudents(query))
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
         AlertDialog.Builder(ctx)
-            .setTitle("📝 Đăng ký Khuôn mặt Mới")
-            .setMessage("Nhập mã định danh / tên người dùng:")
-            .setView(inputName)
-            .setPositiveButton("Tiếp tục") { _, _ ->
-                val name = inputName.text.toString().trim()
-                if (name.isNotEmpty()) {
-                    checkAndProcessRegistration(ctx, name, nv21, latestFrameWidth, latestFrameHeight, box)
+            .setView(dialogView)
+            .setPositiveButton("Xác nhận Đăng ký") { _, _ ->
+                val st = selectedStudent
+                if (st != null) {
+                    checkAndProcessStudentRegistration(ctx, st, nv21, latestFrameWidth, latestFrameHeight, box)
                 } else {
-                    Toast.makeText(ctx, "Tên người dùng không được để trống!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Vui lòng chọn một sinh viên từ danh sách!", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Hủy", null)
             .show()
     }
 
-    private fun checkAndProcessRegistration(
+    private fun checkAndProcessStudentRegistration(
         ctx: Context,
-        userName: String,
+        student: Student,
         nv21: ByteArray,
         width: Int,
         height: Int,
@@ -603,17 +679,17 @@ class KioskCameraFragment : Fragment() {
         val embedding = model.extractEmbedding(croppedFace)
         croppedFace.recycle()
 
-        // 1. Check duplicate ID / Name
-        val existingNameUser = UserFaceRepository.findUserByName(userName)
-        if (existingNameUser != null) {
+        // 1. Check duplicate Student ID
+        val existingStudentFace = UserFaceRepository.findUserByStudentId(student.studentId)
+        if (existingStudentFace != null) {
             AlertDialog.Builder(ctx)
-                .setTitle("⚠️ Trùng Tên / Mã Sinh Viên")
-                .setMessage("Tên/Mã '${userName}' đã tồn tại trong cơ sở dữ liệu!\nBạn có muốn CẬP NHẬT LẠI khuôn mặt mới cho người dùng này không?")
-                .setPositiveButton("Cập nhật lại") { _, _ ->
-                    val updatedUser = UserFaceModel(existingNameUser.id, userName, embedding)
-                    UserFaceRepository.updateUser(ctx, updatedUser)
-                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho: $userName")
-                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho $userName!", Toast.LENGTH_SHORT).show()
+                .setTitle("⚠️ Sinh Viên Đã Đăng Ký Khuôn Mặt")
+                .setMessage("Sinh viên ${student.fullName} (MSSV: ${student.studentId}) đã đăng ký khuôn mặt trước đó!\nBạn có muốn CẬP NHẬT LẠI khuôn mặt mới không?")
+                .setPositiveButton("Cập nhật mới") { _, _ ->
+                    val updatedUser = UserFaceModel(student.studentId, student.fullName, embedding)
+                    UserFaceRepository.updateStudentFace(ctx, updatedUser)
+                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho sinh viên: ${student.fullName} (${student.studentId})")
+                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${student.fullName}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
                 .setNegativeButton("Hủy", null)
@@ -625,21 +701,23 @@ class KioskCameraFragment : Fragment() {
         val duplicateFaceMatch = UserFaceRepository.checkDuplicateFace(embedding, duplicateThreshold = 0.72f)
         if (duplicateFaceMatch != null) {
             val (dupUser, similarity) = duplicateFaceMatch
+            val dupStudent = StudentRepository.findStudentById(dupUser.studentId)
+            val dupName = dupStudent?.fullName ?: dupUser.name
             val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
 
             AlertDialog.Builder(ctx)
                 .setTitle("🚨 Cảnh Báo Trùng Khuôn Mặt")
-                .setMessage("Khuôn mặt này trùng khớp $percentStr với người dùng '${dupUser.name}' đã đăng ký trước đó!\nBạn muốn xử lý thế nào?")
-                .setPositiveButton("Cập nhật cho '${dupUser.name}'") { _, _ ->
-                    val updatedUser = UserFaceModel(dupUser.id, dupUser.name, embedding)
-                    UserFaceRepository.updateUser(ctx, updatedUser)
-                    appendLog("🔄 Đã cập nhật lại khuôn mặt cho người dùng cũ: ${dupUser.name}")
-                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${dupUser.name}!", Toast.LENGTH_SHORT).show()
+                .setMessage("Khuôn mặt này trùng khớp $percentStr với sinh viên '${dupName}' (MSSV: ${dupUser.studentId}) đã đăng ký!\nBạn muốn xử lý thế nào?")
+                .setPositiveButton("Cập nhật cho '${dupName}'") { _, _ ->
+                    val updatedUser = UserFaceModel(dupUser.studentId, dupName, embedding)
+                    UserFaceRepository.updateStudentFace(ctx, updatedUser)
+                    appendLog("🔄 Đã cập nhật khuôn mặt cho sinh viên cũ: $dupName (${dupUser.studentId})")
+                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho $dupName!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
-                .setNeutralButton("Vẫn đăng ký mới tên '$userName'") { _, _ ->
-                    val registeredUser = UserFaceRepository.registerUser(ctx, userName, embedding)
-                    appendLog("✅ Đã đăng ký mới: ${registeredUser.name} [ID: ${registeredUser.id}]")
+                .setNeutralButton("Vẫn liên kết cho '${student.fullName}'") { _, _ ->
+                    val registeredUser = UserFaceRepository.registerStudentFace(ctx, student.studentId, student.fullName, embedding)
+                    appendLog("✅ Đã liên kết khuôn mặt cho sinh viên mới: ${registeredUser.name} (${registeredUser.studentId})")
                     Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
@@ -649,8 +727,8 @@ class KioskCameraFragment : Fragment() {
         }
 
         // 3. Normal registration
-        val registeredUser = UserFaceRepository.registerUser(ctx, userName, embedding)
-        appendLog("✅ Đã đăng ký thành công: ${registeredUser.name} [ID: ${registeredUser.id}]")
+        val registeredUser = UserFaceRepository.registerStudentFace(ctx, student.studentId, student.fullName, embedding)
+        appendLog("✅ Đã đăng ký khuôn mặt thành công: ${registeredUser.name} (${registeredUser.studentId})")
         Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
         updateRecognitionStatusUI()
     }
@@ -700,11 +778,19 @@ class KioskCameraFragment : Fragment() {
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
                 val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
-                val resultText = "✅ KHỚP: ${matchedUser.name} (Độ tương đồng: $percentStr)"
-                binding.tvRecognitionResultB.text = resultText
-                binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+                val student = StudentRepository.findStudentById(matchedUser.studentId)
+
+                if (student != null) {
+                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${student.studentId} | Họ tên: ${student.fullName}\nLớp: ${student.className} | Khoa: ${student.faculty} | Độ tương đồng: $percentStr"
+                    binding.tvRecognitionResultB.text = resultText
+                    binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+                } else {
+                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${matchedUser.studentId} | Tên: ${matchedUser.name} | Độ tương đồng: $percentStr"
+                    binding.tvRecognitionResultB.text = resultText
+                    binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+                }
             } else {
-                binding.tvRecognitionResultB.text = "❌ Không trùng khớp với người dùng nào trong DB"
+                binding.tvRecognitionResultB.text = "❌ Không tìm thấy thông tin sinh viên phù hợp trong DB"
                 binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
             }
         } catch (e: Exception) {
@@ -733,10 +819,10 @@ class KioskCameraFragment : Fragment() {
         val ctx = context
         val count = if (ctx != null) UserFaceRepository.getUserCount(ctx) else 0
         if (count == 0) {
-            binding.tvRecognitionResultB.text = "🆔 Nhận diện: Chưa có dữ liệu đăng ký"
+            binding.tvRecognitionResultB.text = "🆔 Nhận diện: Chưa có sinh viên nào đăng ký"
             binding.tvRecognitionResultB.setTextColor(0xFFFFB74D.toInt())
         } else {
-            binding.tvRecognitionResultB.text = "🆔 Đã đăng ký $count mẫu | Chờ so khớp..."
+            binding.tvRecognitionResultB.text = "🆔 Đã đăng ký khuôn mặt cho $count sinh viên | Sẵn sàng so khớp"
             binding.tvRecognitionResultB.setTextColor(0xFF29B6F6.toInt())
         }
     }
