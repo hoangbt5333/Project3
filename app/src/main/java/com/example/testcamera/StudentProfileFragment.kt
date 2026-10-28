@@ -28,38 +28,50 @@ class StudentProfileFragment : Fragment() {
             return
         }
 
+        // Global touch handler to refresh 90s inactivity timer
         view.findViewById<View>(R.id.rootStudentProfile)?.setOnTouchListener { _, _ ->
             KioskSessionManager.touchInactivity()
             false
         }
 
-        view.findViewById<TextView>(R.id.tvStudentName).text = "Họ và tên: ${student.fullName}"
-        view.findViewById<TextView>(R.id.tvStudentId).text = "Mã sinh viên: ${student.studentId}"
-        view.findViewById<TextView>(R.id.tvStudentClass).text = "Lớp: ${student.className} | Khoa: ${student.faculty}"
-        view.findViewById<TextView>(R.id.tvStudentEmail).text = "Email: ${student.email}"
+        // Populate student profile fields dynamically from StudentRepository/Session
+        view.findViewById<TextView>(R.id.tvStudentName)?.text = student.fullName
+        view.findViewById<TextView>(R.id.tvStudentId)?.text = "MSSV: ${student.studentId}"
+        view.findViewById<TextView>(R.id.tvStudentClass)?.text = "Lớp: ${student.className} • Khoa: ${student.faculty}"
+        view.findViewById<TextView>(R.id.tvStudentEmail)?.text = "Email: ${student.email}"
 
-        view.findViewById<Button>(R.id.btnViewGrades).setOnClickListener {
+        // Service 1: Xem Bảng Điểm
+        val openGradesAction = View.OnClickListener {
             KioskSessionManager.touchInactivity()
-            openServicePlaceholder("Xem Bảng Điểm")
+            openServicePlaceholder("Xem Bảng Điểm Học Tập")
         }
+        view.findViewById<Button>(R.id.btnViewGrades)?.setOnClickListener(openGradesAction)
+        view.findViewById<View>(R.id.cardBtnViewGrades)?.setOnClickListener(openGradesAction)
 
-        view.findViewById<Button>(R.id.btnPrintGrades).setOnClickListener {
+        // Service 2: In Bảng Điểm
+        val printGradesAction = View.OnClickListener {
             KioskSessionManager.touchInactivity()
-            openServicePlaceholder("In Bảng Điểm")
+            openServicePlaceholder("In Bảng Điểm Sinh Viên")
         }
+        view.findViewById<Button>(R.id.btnPrintGrades)?.setOnClickListener(printGradesAction)
+        view.findViewById<View>(R.id.cardBtnPrintGrades)?.setOnClickListener(printGradesAction)
 
-        view.findViewById<Button>(R.id.btnOtherServices).setOnClickListener {
+        // Service 3: Dịch Vụ Khác
+        val otherServicesAction = View.OnClickListener {
             KioskSessionManager.touchInactivity()
-            openServicePlaceholder("Dịch Vụ Khác")
+            openServicePlaceholder("Dịch Vụ Sinh Viên Khác")
         }
+        view.findViewById<Button>(R.id.btnOtherServices)?.setOnClickListener(otherServicesAction)
+        view.findViewById<View>(R.id.cardBtnOtherServices)?.setOnClickListener(otherServicesAction)
 
+        // End session actions
         val endSessionAction = View.OnClickListener {
             endSessionAndReturnHome()
         }
+        view.findViewById<Button>(R.id.btnEndSession)?.setOnClickListener(endSessionAction)
+        view.findViewById<Button>(R.id.btnEndSessionTop)?.setOnClickListener(endSessionAction)
 
-        view.findViewById<Button>(R.id.btnEndSession).setOnClickListener(endSessionAction)
-        view.findViewById<Button>(R.id.btnEndSessionTop).setOnClickListener(endSessionAction)
-
+        // Callback when inactivity timeout triggers
         KioskSessionManager.setOnSessionEndedListener {
             activity?.runOnUiThread {
                 (activity as? MainActivity)?.navigateToHome()

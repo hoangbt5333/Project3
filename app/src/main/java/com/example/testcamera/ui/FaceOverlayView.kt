@@ -2,11 +2,12 @@ package com.example.testcamera.ui
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import androidx.core.content.ContextCompat
+import com.example.testcamera.R
 import com.google.mlkit.vision.face.Face
 
 class FaceOverlayView @JvmOverloads constructor(
@@ -20,24 +21,22 @@ class FaceOverlayView @JvmOverloads constructor(
     private var imageHeight: Int = 0
 
     private val boxRect = RectF()
-    private val textBgRect = RectF()
 
-    private val boxPaint = Paint().apply {
-        color = 0xFF00E676.toInt() // Bright Green
+    private var frameColor: Int = ContextCompat.getColor(context, R.color.hust_gold)
+
+    private val cornerPaint = Paint().apply {
+        color = frameColor
         style = Paint.Style.STROKE
-        strokeWidth = 6f
+        strokeWidth = 8f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
         isAntiAlias = true
     }
 
-    private val textBackgroundPaint = Paint().apply {
-        color = 0xAA000000.toInt() // Semi-transparent black
-        style = Paint.Style.FILL
-        isAntiAlias = true
-    }
-
-    private val textPaint = Paint().apply {
-        color = Color.WHITE
-        textSize = 28f
+    private val guidePaint = Paint().apply {
+        color = 0x66F5A623.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
         isAntiAlias = true
     }
 
@@ -45,6 +44,12 @@ class FaceOverlayView @JvmOverloads constructor(
         this.faces = faceList ?: emptyList()
         this.imageWidth = imgWidth
         this.imageHeight = imgHeight
+        postInvalidate()
+    }
+
+    fun setHighlightColor(color: Int) {
+        this.frameColor = color
+        this.cornerPaint.color = color
         postInvalidate()
     }
 
@@ -61,46 +66,41 @@ class FaceOverlayView @JvmOverloads constructor(
         val scaleX = width.toFloat() / imageWidth.toFloat()
         val scaleY = height.toFloat() / imageHeight.toFloat()
 
-        for ((index, face) in faces.withIndex()) {
+        for (face in faces) {
             val bounds = face.boundingBox
 
-            val left = bounds.left.toFloat() * scaleX
-            val top = bounds.top.toFloat() * scaleY
-            val right = bounds.right.toFloat() * scaleX
-            val bottom = bounds.bottom.toFloat() * scaleY
+            val left = (bounds.left.toFloat() * scaleX).coerceAtLeast(0f)
+            val top = (bounds.top.toFloat() * scaleY).coerceAtLeast(0f)
+            val right = (bounds.right.toFloat() * scaleX).coerceAtMost(width.toFloat())
+            val bottom = (bounds.bottom.toFloat() * scaleY).coerceAtMost(height.toFloat())
 
-            boxRect.set(
-                left.coerceAtLeast(0f),
-                top.coerceAtLeast(0f),
-                right.coerceAtMost(width.toFloat()),
-                bottom.coerceAtMost(height.toFloat())
-            )
+            boxRect.set(left, top, right, bottom)
 
-            // Draw bounding box
-            canvas.drawRect(boxRect, boxPaint)
+            // Draw thin outline
+            canvas.drawRoundRect(boxRect, 20f, 20f, guidePaint)
 
-            // Draw label
-            val label = "Khuôn mặt #${index + 1}"
-            val textWidth = textPaint.measureText(label)
-            val textHeight = textPaint.textSize
+            // Draw sleek corner brackets for a modern kiosk camera scan appearance
+            val cornerLength = ((right - left) * 0.2f).coerceIn(24f, 60f)
 
-            val textTop = if ((top - textHeight - 12f) > 0f) top - textHeight - 12f else top
-            val textBottom = if ((top - textHeight - 12f) > 0f) top else top + textHeight + 12f
+            // Top-Left
+            canvas.drawLine(left, top + cornerLength, left, top + 16f, cornerPaint)
+            canvas.drawArc(left, top, left + 32f, top + 32f, 180f, 90f, false, cornerPaint)
+            canvas.drawLine(left + 16f, top, left + cornerLength, top, cornerPaint)
 
-            textBgRect.set(
-                left,
-                textTop,
-                (left + textWidth + 16f).coerceAtMost(width.toFloat()),
-                textBottom
-            )
-            canvas.drawRect(textBgRect, textBackgroundPaint)
+            // Top-Right
+            canvas.drawLine(right - cornerLength, top, right - 16f, top, cornerPaint)
+            canvas.drawArc(right - 32f, top, right, top + 32f, 270f, 90f, false, cornerPaint)
+            canvas.drawLine(right, top + 16f, right, top + cornerLength, cornerPaint)
 
-            canvas.drawText(
-                label,
-                left + 8f,
-                if ((top - textHeight - 12f) > 0f) top - 8f else top + textHeight,
-                textPaint
-            )
+            // Bottom-Left
+            canvas.drawLine(left, bottom - cornerLength, left, bottom - 16f, cornerPaint)
+            canvas.drawArc(left, bottom - 32f, left + 32f, bottom, 90f, 90f, false, cornerPaint)
+            canvas.drawLine(left + 16f, bottom, left + cornerLength, bottom, cornerPaint)
+
+            // Bottom-Right
+            canvas.drawLine(right - cornerLength, bottom, right - 16f, bottom, cornerPaint)
+            canvas.drawArc(right - 32f, bottom - 32f, right, bottom, 0f, 90f, false, cornerPaint)
+            canvas.drawLine(right, bottom - 16f, right, bottom - cornerLength, cornerPaint)
         }
     }
 }

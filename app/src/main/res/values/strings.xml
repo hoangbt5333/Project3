@@ -1,3 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TestCamera</string>
+    <string name="app_name">HUST Smart Kiosk</string>
+    <string name="university_name">ĐẠI HỌC BÁCH KHOA HÀ NỘI</string>
+    <string name="university_sub">HANOI UNIVERSITY OF SCIENCE AND TECHNOLOGY</string>
+    <string name="kiosk_system_title">HỆ THỐNG SMART KIOSK SINH VIÊN</string>
+    <string name="kiosk_home_hint">Vui lòng chạm vào nút bên dưới để bắt đầu xác thực khuôn mặt</string>
+    <string name="kiosk_start_auth">BẮT ĐẦU XÁC THỰC KHUÔN MẶT</string>
+    <string name="kiosk_system_ready">Hệ thống sẵn sàng phục vụ sinh viên</string>
 </resources>

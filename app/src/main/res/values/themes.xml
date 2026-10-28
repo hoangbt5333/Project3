@@ -1,8 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Base application theme with HUST Red & Gold Branding -->
     <style name="Base.Theme.TestCamera" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <!-- Brand Colors -->
+        <item name="colorPrimary">@color/hust_red</item>
+        <item name="colorPrimaryVariant">@color/hust_red_dark</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/hust_gold</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:statusBarColor">@color/hust_red_dark</item>
+        <item name="android:navigationBarColor">@color/black</item>
     </style>
 
     <style name="Theme.TestCamera" parent="Base.Theme.TestCamera" />

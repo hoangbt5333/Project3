@@ -3,59 +3,206 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:gravity="center"
-    android:background="#121212"
-    android:padding="24dp">
+    android:background="@color/kiosk_bg">
 
-    <!-- Header Icon & Branding -->
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- Top Header Bar (HUST Dark Bar inspired by reference) -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="🏫"
-        android:textSize="64sp"
-        android:paddingBottom="8dp" />
+        android:orientation="horizontal"
+        android:background="@drawable/bg_hust_header"
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="14dp"
+        android:gravity="center_vertical">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="HỆ THỐNG SMART KIOSK SINH VIÊN"
-        android:textColor="#00E676"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:paddingBottom="12dp" />
+        <ImageView
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:src="@drawable/ic_hust_emblem"
+            android:contentDescription="HUST Emblem" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Vui lòng chạm nút bên dưới hoặc nhìn vào camera để xác thực danh tính"
-        android:textColor="#CCCCCC"
-        android:textSize="14sp"
-        android:textAlignment="center"
-        android:paddingBottom="32dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingStart="16dp">
 
-    <!-- Start Action Button -->
-    <Button
-        android:id="@+id/btnStartAuthentication"
-        style="@style/Widget.Material3.Button.TonalButton"
-        android:layout_width="wrap_content"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/university_name"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/university_sub"
+                android:textColor="@color/hust_gold"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.06" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/badge_status_bg"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="6dp"
+            android:text="KIOSK TỰ ĐỘNG"
+            android:textColor="@color/status_info"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Sub-header Banner (Warm Golden Pattern Accent like HUST Portal) -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="32dp"
+        android:background="@drawable/bg_hust_home_banner"
+        android:paddingHorizontal="24dp"
         android:paddingVertical="16dp"
-        android:text="📸 BẮT ĐẦU XÁC THỰC KHUÔN MẶT"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-    <!-- Status Badge -->
-    <TextView
-        android:layout_width="wrap_content"
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="HỆ THỐNG XÁC THỰC &amp; DỊCH VỤ SINH VIÊN THÔNG MINH"
+            android:textColor="@color/hust_red_dark"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="HUST SMART KIOSK"
+            android:textColor="#8D6E63"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium" />
+    </LinearLayout>
+
+    <!-- Main Content Area -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:padding="24dp"
+        android:orientation="vertical">
+
+        <!-- Central Welcome Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxWidth="640dp"
+            android:background="@drawable/card_white_rounded"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingHorizontal="32dp"
+            android:paddingVertical="36dp"
+            android:elevation="3dp">
+
+            <!-- Scanner Visual Icon -->
+            <FrameLayout
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:background="@drawable/camera_guide_overlay"
+                android:padding="16dp"
+                android:layout_marginBottom="20dp">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:src="@drawable/ic_face_scan"
+                    android:tint="@color/hust_red"
+                    android:contentDescription="Face Recognition" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="XÁC THỰC KHUÔN MẶT SINH VIÊN"
+                android:textColor="@color/hust_red"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textAlignment="center"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Chào mừng bạn đến với Kiosk tự phục vụ ĐHBK Hà Nội.\nVui lòng đứng trước thiết bị và bấm nút bên dưới để bắt đầu."
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:textAlignment="center"
+                android:lineSpacingExtra="4dp"
+                android:paddingBottom="28dp" />
+
+            <!-- Big Touch Start Button -->
+            <Button
+                android:id="@+id/btnStartAuthentication"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:background="@drawable/btn_hust_primary"
+                android:backgroundTint="@null"
+                android:text="📸  BẮT ĐẦU XÁC THỰC KHUÔN MẶT"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:elevation="4dp" />
+
+            <!-- System Ready Badge -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="24dp"
+                android:background="@drawable/badge_status_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="8dp">
+
+                <View
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/btn_hust_primary"
+                    android:backgroundTint="@color/status_success"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/tvHomeSystemStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Camera &amp; ML Kit Sẵn Sàng"
+                    android:textColor="@color/status_success"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom Footer -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:background="#222222"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp"
-        android:text="🟢 Hệ thống sẵn sàng kết nối Camera UVC &amp; ML Kit"
-        android:textColor="#888888"
-        android:textSize="12sp" />
+        android:padding="16dp"
+        android:gravity="center"
+        android:background="#EAEFF5">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="© 2026 Đại học Bách Khoa Hà Nội • Bùi Trung Hoàng 20235333"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+    </LinearLayout>
 
 </LinearLayout>

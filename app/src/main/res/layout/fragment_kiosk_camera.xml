@@ -1,458 +1,627 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#121212">
+    android:background="@color/kiosk_bg">
 
-    <!-- Header Toolbar -->
+    <!-- Top Header Bar with HUST Red & Navigation -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#1E1E1E"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:background="@drawable/bg_hust_header"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp"
         android:gravity="center_vertical">
 
-        <TextView
+        <!-- Back to Home Button -->
+        <Button
+            android:id="@+id/btnBackToHome"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:backgroundTint="#40FFFFFF"
+            android:textColor="@color/white"
+            android:text="◀  Màn hình chính"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingHorizontal="12dp" />
+
+        <!-- Title & Emblem -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Kiosk Dual UVC Camera Tester"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingHorizontal="12dp">
 
+            <ImageView
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_hust_emblem"
+                android:layout_marginEnd="10dp"
+                android:contentDescription="HUST Logo" />
+
+            <TextView
+                android:id="@+id/tvCameraScreenTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="XÁC THỰC DANH TÍNH SINH VIÊN"
+                android:textColor="@color/white"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.03" />
+        </LinearLayout>
+
+        <!-- Main Status Badge -->
         <TextView
             android:id="@+id/tvMainStatusBadge"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="#333333"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="4dp"
+            android:background="@drawable/badge_status_bg"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp"
             android:text="ĐANG QUÉT USB..."
-            android:textColor="#FFCC00"
+            android:textColor="@color/status_info"
             android:textSize="11sp"
             android:textStyle="bold" />
+
+        <!-- Tech Mode Discreet Toggle -->
+        <Button
+            android:id="@+id/btnToggleTechMode"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#33000000"
+            android:textColor="@color/hust_gold"
+            android:text="⚙️ Kỹ thuật"
+            android:textSize="12sp"
+            android:paddingHorizontal="10dp" />
     </LinearLayout>
 
-    <!-- Dual Camera Preview Area (100% Symmetric Panel A & Panel B) -->
-    <LinearLayout
+    <!-- Main Container: Holds Student View or Tech View -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="horizontal"
-        android:baselineAligned="false">
+        android:layout_weight="1">
 
-        <!-- ==================== CAMERA A PANEL (IR / Thermal) ==================== -->
+        <!-- ==================== 1. STUDENT VERIFICATION VIEW ==================== -->
         <LinearLayout
-            android:layout_width="0dp"
+            android:id="@+id/layoutStudentVerification"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#1A1A1A"
             android:orientation="vertical"
-            android:padding="4dp">
+            android:gravity="center_horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="12dp">
 
-            <!-- Panel Header A -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="2dp">
-
-                <TextView
-                    android:id="@+id/tvTitleA"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="📷 Camera A (Thermal / Cam 1)"
-                    android:textColor="#4CAF50"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvStatusBadgeA"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="#444444"
-                    android:paddingHorizontal="6dp"
-                    android:paddingVertical="2dp"
-                    android:text="CHƯA KẾT NỐI"
-                    android:textColor="#AAAAAA"
-                    android:textSize="10sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <!-- Device Info A -->
+            <!-- Subtitle / Instruction Header -->
             <TextView
-                android:id="@+id/tvDeviceInfoA"
-                android:layout_width="match_parent"
+                android:id="@+id/tvInstructionHint"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Thiết bị: Chưa phát hiện"
-                android:textColor="#BBBBBB"
-                android:textSize="10sp"
-                android:maxLines="1"
-                android:ellipsize="end" />
+                android:text="Vui lòng đứng thẳng, nhìn vào khung camera để hệ thống nhận diện"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:textAlignment="center"
+                android:paddingBottom="8dp" />
 
-            <!-- Preview Container A -->
+            <!-- Primary Camera Viewfinder (RGB - Camera B) -->
             <FrameLayout
-                android:id="@+id/cameraContainerA"
+                android:id="@+id/cardStudentCameraView"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginVertical="2dp"
-                android:background="#000000">
+                android:maxWidth="640dp"
+                android:background="#000000"
+                android:clipToOutline="true">
 
-                <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
-                    android:id="@+id/uvcSurfaceViewA"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="center" />
-
-                <TextView
-                    android:id="@+id/tvOverlayA"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:background="#B3000000"
-                    android:padding="8dp"
-                    android:text="Chờ kết nối Camera A..."
-                    android:textAlignment="center"
-                    android:textColor="#CCCCCC"
-                    android:textSize="12sp" />
-            </FrameLayout>
-
-            <!-- Stats Bar A -->
-            <TextView
-                android:id="@+id/tvStatsA"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Độ phân giải: -- | FPS: 0"
-                android:textColor="#00E676"
-                android:textSize="10sp"
-                android:fontFamily="monospace" />
-
-            <!-- Control Buttons A -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingTop="2dp">
-
-                <Button
-                    android:id="@+id/btnConnectA"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="2dp"
-                    android:text="▶️ Mở"
-                    android:textSize="10sp" />
-
-                <Button
-                    android:id="@+id/btnStopA"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="2dp"
-                    android:text="⏹️ Đóng"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp" />
-
-                <Button
-                    android:id="@+id/btnCaptureA"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:paddingHorizontal="2dp"
-                    android:text="📸 Chụp"
-                    android:textSize="10sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- ==================== CAMERA B PANEL (RGB) ==================== -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#1A1A1A"
-            android:orientation="vertical"
-            android:padding="4dp">
-
-            <!-- Panel Header B -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="2dp">
-
-                <TextView
-                    android:id="@+id/tvTitleB"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="📷 Camera B (RGB / Cam 2)"
-                    android:textColor="#2196F3"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvStatusBadgeB"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="#444444"
-                    android:paddingHorizontal="6dp"
-                    android:paddingVertical="2dp"
-                    android:text="CHƯA KẾT NỐI"
-                    android:textColor="#AAAAAA"
-                    android:textSize="10sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <!-- Device Info B -->
-            <TextView
-                android:id="@+id/tvDeviceInfoB"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Thiết bị: Chưa phát hiện"
-                android:textColor="#BBBBBB"
-                android:textSize="10sp"
-                android:maxLines="1"
-                android:ellipsize="end" />
-
-            <!-- Preview Container B -->
-            <FrameLayout
-                android:id="@+id/cameraContainerB"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:layout_marginVertical="2dp"
-                android:background="#000000">
-
+                <!-- UVC Video Stream Surface B (RGB) -->
                 <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
                     android:id="@+id/uvcSurfaceViewB"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:layout_gravity="center" />
 
+                <!-- Face Recognition Overlay B -->
                 <com.example.testcamera.ui.FaceOverlayView
                     android:id="@+id/faceOverlayB"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent" />
 
+                <!-- Center Oval / Rounded Target Guide Frame -->
+                <View
+                    android:id="@+id/viewFaceGuideTarget"
+                    android:layout_width="260dp"
+                    android:layout_height="320dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/camera_guide_overlay" />
+
+                <!-- Camera B Overlay message when camera is offline -->
                 <TextView
                     android:id="@+id/tvOverlayB"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:background="#B3000000"
-                    android:padding="8dp"
-                    android:text="Chờ kết nối Camera B..."
+                    android:background="#CC000000"
+                    android:paddingHorizontal="20dp"
+                    android:paddingVertical="12dp"
+                    android:text="Đang kết nối Camera RGB Kiosk..."
                     android:textAlignment="center"
-                    android:textColor="#CCCCCC"
-                    android:textSize="12sp" />
+                    android:textColor="@color/white"
+                    android:textSize="14sp" />
+
+                <!-- Secondary Camera A (IR / Thermal) PIP View in corner (always keeps surface alive) -->
+                <FrameLayout
+                    android:id="@+id/pipContainerA"
+                    android:layout_width="130dp"
+                    android:layout_height="100dp"
+                    android:layout_gravity="bottom|end"
+                    android:layout_margin="12dp"
+                    android:background="#1E1E1E">
+
+                    <com.jiangdg.ausbc.widget.AspectRatioSurfaceView
+                        android:id="@+id/uvcSurfaceViewA"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center" />
+
+                    <TextView
+                        android:id="@+id/tvOverlayA"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:padding="4dp"
+                        android:text="IR Cam"
+                        android:textColor="#888888"
+                        android:textSize="10sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:background="#99000000"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="2dp"
+                        android:text="IR (Phụ)"
+                        android:textColor="@color/hust_gold"
+                        android:textSize="9sp" />
+                </FrameLayout>
+
+                <!-- Success Overlay Banner (Displays for 0.8s - 1.2s on match) -->
+                <LinearLayout
+                    android:id="@+id/layoutSuccessBanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#D9000000"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="24dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:layout_width="64dp"
+                        android:layout_height="64dp"
+                        android:src="@drawable/ic_check_circle"
+                        android:contentDescription="Success" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="XÁC THỰC THÀNH CÔNG!"
+                        android:textColor="@color/status_success"
+                        android:textSize="22sp"
+                        android:textStyle="bold"
+                        android:paddingTop="12dp" />
+
+                    <TextView
+                        android:id="@+id/tvSuccessStudentName"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Xin chào: --"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:paddingTop="6dp" />
+
+                    <TextView
+                        android:id="@+id/tvSuccessStudentId"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MSSV: --"
+                        android:textColor="@color/hust_gold"
+                        android:textSize="15sp"
+                        android:paddingTop="4dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Đang chuyển tới Trang cá nhân..."
+                        android:textColor="#AAAAAA"
+                        android:textSize="12sp"
+                        android:paddingTop="12dp" />
+                </LinearLayout>
+
             </FrameLayout>
 
-            <!-- Stats Bar B -->
-            <TextView
-                android:id="@+id/tvStatsB"
+            <!-- Verification Status Card -->
+            <LinearLayout
+                android:id="@+id/cardVerificationStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Độ phân giải: -- | FPS: 0"
-                android:textColor="#29B6F6"
-                android:textSize="10sp"
-                android:fontFamily="monospace" />
+                android:maxWidth="640dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card_white_rounded"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="12dp"
+                android:elevation="2dp">
 
-            <!-- Control Buttons B -->
+                <ImageView
+                    android:id="@+id/ivStatusIcon"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:src="@drawable/ic_face_scan"
+                    android:tint="@color/hust_red"
+                    android:contentDescription="Status Icon" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="12dp">
+
+                    <TextView
+                        android:id="@+id/tvStatusTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Đang quét khuôn mặt..."
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvStatusMessage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Vui lòng giữ nguyên khuôn mặt trong khung hình"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnRetryVerification"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Thử lại"
+                    android:textSize="12sp"
+                    android:textColor="@color/hust_red"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- ==================== 2. TECHNICAL / ADMIN DIAGNOSTIC PANEL ==================== -->
+        <ScrollView
+            android:id="@+id/layoutTechnicalPanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#181818"
+            android:visibility="gone">
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingTop="2dp">
+                android:orientation="vertical"
+                android:padding="10dp">
 
-                <Button
-                    android:id="@+id/btnConnectB"
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="0dp"
+                <TextView
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="2dp"
-                    android:text="▶️ Mở"
-                    android:textSize="10sp" />
+                    android:text="🛠️ BẢNG ĐIỀU KHIỂN KỸ THUẬT &amp; CẤU HÌNH DUAL CAMERA"
+                    android:textColor="@color/hust_gold"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="8dp" />
 
-                <Button
-                    android:id="@+id/btnStopB"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
+                <!-- Dual Camera Preview Control Row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="2dp"
-                    android:paddingHorizontal="2dp"
-                    android:text="⏹️ Đóng"
-                    android:textColor="#FFFFFF"
-                    android:textSize="10sp" />
+                    android:orientation="horizontal">
 
-                <Button
-                    android:id="@+id/btnCaptureB"
-                    android:layout_width="0dp"
+                    <!-- Panel A Tech Controls -->
+                    <LinearLayout
+                        android:id="@+id/cameraContainerA"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="#222222"
+                        android:padding="8dp"
+                        android:layout_marginEnd="4dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvTitleA"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="📷 Camera A (IR / Thermal)"
+                            android:textColor="#4CAF50"
+                            android:textStyle="bold"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvStatusBadgeA"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="#444444"
+                            android:text="CHƯA KẾT NỐI"
+                            android:textColor="#AAAAAA"
+                            android:textSize="10sp"
+                            android:padding="2dp" />
+
+                        <TextView
+                            android:id="@+id/tvDeviceInfoA"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Thiết bị: --"
+                            android:textColor="#BBBBBB"
+                            android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvStatsA"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Độ phân giải: -- | FPS: 0"
+                            android:textColor="#00E676"
+                            android:textSize="10sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:paddingTop="4dp">
+
+                            <Button
+                                android:id="@+id/btnConnectA"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="▶ Mở"
+                                android:textSize="10sp" />
+
+                            <Button
+                                android:id="@+id/btnStopA"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="⏹ Đóng"
+                                android:textColor="#FFFFFF"
+                                android:textSize="10sp" />
+
+                            <Button
+                                android:id="@+id/btnCaptureA"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="📸 Chụp"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Panel B Tech Controls -->
+                    <LinearLayout
+                        android:id="@+id/cameraContainerB"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="#222222"
+                        android:padding="8dp"
+                        android:layout_marginStart="4dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvTitleB"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="📷 Camera B (RGB)"
+                            android:textColor="#2196F3"
+                            android:textStyle="bold"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvStatusBadgeB"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="#444444"
+                            android:text="CHƯA KẾT NỐI"
+                            android:textColor="#AAAAAA"
+                            android:textSize="10sp"
+                            android:padding="2dp" />
+
+                        <TextView
+                            android:id="@+id/tvDeviceInfoB"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Thiết bị: --"
+                            android:textColor="#BBBBBB"
+                            android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvStatsB"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Độ phân giải: -- | FPS: 0"
+                            android:textColor="#29B6F6"
+                            android:textSize="10sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:paddingTop="4dp">
+
+                            <Button
+                                android:id="@+id/btnConnectB"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="▶ Mở"
+                                android:textSize="10sp" />
+
+                            <Button
+                                android:id="@+id/btnStopB"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="⏹ Đóng"
+                                android:textColor="#FFFFFF"
+                                android:textSize="10sp" />
+
+                            <Button
+                                android:id="@+id/btnCaptureB"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:text="📸 Chụp"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Recognition Status & Controls -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:paddingHorizontal="2dp"
-                    android:text="📸 Chụp"
-                    android:textSize="10sp" />
+                    android:orientation="vertical"
+                    android:background="#1E1E1E"
+                    android:padding="8dp"
+                    android:layout_marginTop="8dp">
+
+                    <TextView
+                        android:id="@+id/tvFaceStatusB"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="👤 ML Kit: Khởi tạo..."
+                        android:textColor="#00E676"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/tvRecognitionResultB"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="🆔 Nhận diện: Chưa có dữ liệu"
+                        android:textColor="#FFB74D"
+                        android:textSize="11sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingTop="8dp">
+
+                        <Button
+                            android:id="@+id/btnRegisterFaceB"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="4dp"
+                            android:text="📝 Đăng ký mẫu"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnVerifyFaceB"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="4dp"
+                            android:text="🔍 So khớp"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnClearFacesB"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="🗑 Xóa CSDL"
+                            android:textColor="#FF5252"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- USB Devices info -->
+                <TextView
+                    android:id="@+id/tvUsbDevicesInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔌 Đang quét thiết bị USB..."
+                    android:textColor="#4CAF50"
+                    android:textSize="11sp"
+                    android:paddingTop="6dp" />
+
+                <!-- Diagnostic Log Console -->
+                <ScrollView
+                    android:id="@+id/scrollDiagnosticPanel"
+                    android:layout_width="match_parent"
+                    android:layout_height="140dp"
+                    android:background="#0F0F0F"
+                    android:layout_marginTop="6dp"
+                    android:padding="6dp">
+
+                    <TextView
+                        android:id="@+id/tvLogConsole"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:text="[System] Sẵn sàng...\n"
+                        android:textColor="#AAAAAA"
+                        android:textSize="10sp" />
+                </ScrollView>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingTop="6dp">
+
+                    <Button
+                        android:id="@+id/btnRefreshUsb"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:text="🔄 Quét lại USB"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnToggleLogView"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📊 Ẩn/Hiện Log"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
             </LinearLayout>
-        </LinearLayout>
+        </ScrollView>
 
-    </LinearLayout>
-
-    <!-- ==================== SHARED RECOGNITION TOOLBAR ==================== -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#1E1E1E"
-        android:orientation="vertical"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="4dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/tvFaceStatusB"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="👤 ML Kit: Khởi tạo..."
-                android:textColor="#00E676"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
-
-            <TextView
-                android:id="@+id/tvRecognitionResultB"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="🆔 Nhận diện: Chưa có dữ liệu"
-                android:textColor="#FFB74D"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace" />
-        </LinearLayout>
-
-        <!-- Recognition Actions Row -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="4dp">
-
-            <Button
-                android:id="@+id/btnRegisterFaceB"
-                style="@style/Widget.Material3.Button.TonalButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="📝 Đăng ký Khuôn mặt"
-                android:textSize="11sp" />
-
-            <Button
-                android:id="@+id/btnVerifyFaceB"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="🔍 So khớp"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-
-            <Button
-                android:id="@+id/btnClearFacesB"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="🗑️ Xóa CSDL"
-                android:textColor="#FF5252"
-                android:textSize="11sp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- Bottom Collapsible Diagnostic Log Console -->
-    <ScrollView
-        android:id="@+id/scrollDiagnosticPanel"
-        android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:background="#141414"
-        android:padding="6dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/tvUsbDevicesInfo"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🔌 Đang quét thiết bị USB..."
-                android:textColor="#4CAF50"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvLogConsole"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingTop="4dp"
-                android:fontFamily="monospace"
-                android:text="[System] Khởi tạo ứng dụng UVC Kiosk...\n"
-                android:textColor="#AAAAAA"
-                android:textSize="10sp" />
-        </LinearLayout>
-    </ScrollView>
-
-    <!-- Bottom Actions Bar -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#222222"
-        android:orientation="horizontal"
-        android:padding="4dp">
-
-        <Button
-            android:id="@+id/btnRefreshUsb"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:text="🔄 Quét lại USB"
-            android:textSize="11sp" />
-
-        <Button
-            android:id="@+id/btnToggleLogView"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="📊 Ẩn/Hiện Log"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp" />
-    </LinearLayout>
+    </FrameLayout>
 
 </LinearLayout>

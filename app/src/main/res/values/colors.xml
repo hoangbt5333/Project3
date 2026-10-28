@@ -1,5 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Basic Colors -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Hanoi University of Science and Technology (HUST) Brand Palette -->
+    <color name="hust_red">#A71920</color>
+    <color name="hust_red_dark">#7F1016</color>
+    <color name="hust_red_light">#C62828</color>
+    <color name="hust_red_soft_bg">#FBEAEB</color>
+
+    <color name="hust_gold">#F5A623</color>
+    <color name="hust_gold_dark">#D48806</color>
+    <color name="hust_gold_light">#FFF3D0</color>
+
+    <!-- Kiosk Clean Theme Surfaces -->
+    <color name="kiosk_bg">#F4F6F9</color>
+    <color name="kiosk_card_bg">#FFFFFF</color>
+    <color name="kiosk_card_border">#E2E8F0</color>
+    <color name="kiosk_dark_header">#1E1E1E</color>
+    <color name="kiosk_dark_surface">#2A2A2A</color>
+
+    <!-- Text Colors -->
+    <color name="text_primary">#1C1C1E</color>
+    <color name="text_secondary">#4A5568</color>
+    <color name="text_muted">#718096</color>
+    <color name="text_on_red">#FFFFFF</color>
+
+    <!-- Status Colors -->
+    <color name="status_success">#2E7D32</color>
+    <color name="status_success_bg">#E8F5E9</color>
+    <color name="status_warning">#EF6C00</color>
+    <color name="status_warning_bg">#FFF3E0</color>
+    <color name="status_error">#C62828</color>
+    <color name="status_error_bg">#FFEBEE</color>
+    <color name="status_info">#1565C0</color>
+    <color name="status_info_bg">#E3F2FD</color>
 </resources>

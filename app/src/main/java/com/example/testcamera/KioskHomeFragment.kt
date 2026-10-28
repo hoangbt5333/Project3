@@ -5,7 +5,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.TextView
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.UserFaceRepository
 
 class KioskHomeFragment : Fragment() {
 
@@ -23,6 +25,19 @@ class KioskHomeFragment : Fragment() {
         val btnStart = view.findViewById<Button>(R.id.btnStartAuthentication)
         btnStart.setOnClickListener {
             (activity as? MainActivity)?.navigateToFragment(KioskCameraFragment(), addToBackStack = false)
+        }
+
+        // Update system status indicator
+        val ctx = context
+        val tvStatus = view.findViewById<TextView>(R.id.tvHomeSystemStatus)
+        if (ctx != null) {
+            UserFaceRepository.init(ctx)
+            val registeredCount = UserFaceRepository.getUserCount(ctx)
+            if (registeredCount > 0) {
+                tvStatus?.text = "Hệ thống sẵn sàng ($registeredCount sinh viên đã đăng ký)"
+            } else {
+                tvStatus?.text = "Camera sẵn sàng • Sẵn sàng xác thực"
+            }
         }
     }
 }

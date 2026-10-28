@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.testcamera.data.KioskSessionManager
 import com.example.testcamera.data.Student
@@ -48,6 +49,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class KioskCameraFragment : Fragment() {
 
+    enum class VerificationState {
+        CAMERA_CONNECTING,
+        IDLE,
+        DETECTING,
+        VERIFYING,
+        SUCCESS,
+        UNRECOGNIZED
+    }
+
     private var _binding: FragmentKioskCameraBinding? = null
     private val binding get() = _binding!!
 
@@ -77,9 +87,11 @@ class KioskCameraFragment : Fragment() {
     private var latestNv21Bytes: ByteArray? = null
     private var latestFrameWidth = 640
     private var latestFrameHeight = 480
-    private var isAutoVerificationEnabled = false
+    private var isAutoVerificationEnabled = true
     private var isNavigatingToProfile = false
 
+    private var currentVerificationState = VerificationState.CAMERA_CONNECTING
+    private var isTechModeVisible = false
     private var isLogPanelVisible = true
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -118,11 +130,14 @@ class KioskCameraFragment : Fragment() {
         val ctx = requireContext()
         UserFaceRepository.init(ctx)
         isNavigatingToProfile = false
+        isAutoVerificationEnabled = true
 
         initFaceDetector()
         initFaceRecognitionModel()
         initMultiCameraClient()
         setupListeners()
+
+        setVerificationState(VerificationState.CAMERA_CONNECTING)
 
         mainHandler.post(fpsRunnable)
     }
@@ -200,6 +215,20 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun setupListeners() {
+        // Navigation Buttons
+        binding.btnBackToHome.setOnClickListener {
+            (activity as? MainActivity)?.navigateToHome()
+        }
+
+        binding.btnToggleTechMode.setOnClickListener {
+            toggleTechMode()
+        }
+
+        binding.btnRetryVerification.setOnClickListener {
+            setVerificationState(VerificationState.IDLE)
+            isAutoVerificationEnabled = true
+        }
+
         // Panel A Buttons
         binding.btnConnectA.setOnClickListener { connectCameraA() }
         binding.btnStopA.setOnClickListener { closeCameraA() }
@@ -223,6 +252,87 @@ class KioskCameraFragment : Fragment() {
 
         binding.btnToggleLogView.setOnClickListener {
             toggleLogPanel()
+        }
+    }
+
+    private fun toggleTechMode() {
+        isTechModeVisible = !isTechModeVisible
+        if (isTechModeVisible) {
+            binding.layoutTechnicalPanel.visibility = View.VISIBLE
+            binding.layoutStudentVerification.visibility = View.GONE
+            binding.btnToggleTechMode.text = "👤 Chế độ SV"
+            binding.tvCameraScreenTitle.text = "BẢNG KỸ THUẬT & CAMERA"
+        } else {
+            binding.layoutTechnicalPanel.visibility = View.GONE
+            binding.layoutStudentVerification.visibility = View.VISIBLE
+            binding.btnToggleTechMode.text = "⚙️ Kỹ thuật"
+            binding.tvCameraScreenTitle.text = "XÁC THỰC DANH TÍNH SINH VIÊN"
+        }
+    }
+
+    private fun setVerificationState(state: VerificationState, student: Student? = null) {
+        if (_binding == null) return
+        currentVerificationState = state
+        val ctx = context ?: return
+
+        when (state) {
+            VerificationState.CAMERA_CONNECTING -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_info))
+                binding.tvStatusTitle.text = "Đang kết nối camera Kiosk..."
+                binding.tvStatusMessage.text = "Vui lòng đợi thiết bị khởi tạo kết nối UVC"
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+            }
+            VerificationState.IDLE -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_red))
+                binding.tvStatusTitle.text = "Chờ xác thực"
+                binding.tvStatusMessage.text = "Vui lòng nhìn thẳng vào khung camera để nhận diện"
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+            }
+            VerificationState.DETECTING -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_gold))
+                binding.tvStatusTitle.text = "Đã phát hiện khuôn mặt"
+                binding.tvStatusMessage.text = "Vui lòng giữ nguyên vị trí trong khung hình..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+            }
+            VerificationState.VERIFYING -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_red))
+                binding.tvStatusTitle.text = "Đang xác minh danh tính..."
+                binding.tvStatusMessage.text = "Đang đối soát dữ liệu với CSDL sinh viên..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+            }
+            VerificationState.SUCCESS -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_check_circle)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_success))
+                binding.tvStatusTitle.text = "Xác thực thành công!"
+                binding.tvStatusMessage.text = if (student != null) "Xin chào: ${student.fullName} (${student.studentId})" else "Nhận diện sinh viên thành công"
+                binding.btnRetryVerification.visibility = View.GONE
+
+                if (student != null) {
+                    binding.tvSuccessStudentName.text = "Xin chào: ${student.fullName}"
+                    binding.tvSuccessStudentId.text = "MSSV: ${student.studentId} • Lớp: ${student.className}"
+                }
+                binding.layoutSuccessBanner.visibility = View.VISIBLE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_success))
+            }
+            VerificationState.UNRECOGNIZED -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_alert)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_warning))
+                binding.tvStatusTitle.text = "Không xác minh được"
+                binding.tvStatusMessage.text = "Không tìm thấy thông tin sinh viên phù hợp trong CSDL"
+                binding.btnRetryVerification.visibility = View.VISIBLE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
+            }
         }
     }
 
@@ -275,19 +385,19 @@ class KioskCameraFragment : Fragment() {
             binding.tvDeviceInfoA.text = "Thiết bị: Chưa kết nối"
             binding.tvStatusBadgeA.text = "CHƯA PHÁT HIỆN"
             binding.tvStatusBadgeA.setBackgroundColor(0xFF555555.toInt())
-            binding.tvOverlayA.text = "Vui lòng cắm Camera UVC #1"
+            binding.tvOverlayA.text = "Chưa cắm Cam A"
             binding.tvOverlayA.visibility = View.VISIBLE
         } else {
             binding.tvDeviceInfoA.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeA.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFFE65100.toInt())
-                binding.tvOverlayA.text = "Bấm '▶️ Mở' để xin quyền USB"
+                binding.tvOverlayA.text = "Cần cấp quyền"
                 binding.tvOverlayA.visibility = View.VISIBLE
             } else if (mCameraA?.isCameraOpened() != true) {
                 binding.tvStatusBadgeA.text = "SẴN SÀNG"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFF1565C0.toInt())
-                binding.tvOverlayA.text = "Bấm '▶️ Mở' để xem luồng video"
+                binding.tvOverlayA.text = "Sẵn sàng mở"
                 binding.tvOverlayA.visibility = View.VISIBLE
             }
         }
@@ -298,20 +408,24 @@ class KioskCameraFragment : Fragment() {
             binding.tvDeviceInfoB.text = "Thiết bị: Chưa kết nối"
             binding.tvStatusBadgeB.text = "CHƯA PHÁT HIỆN"
             binding.tvStatusBadgeB.setBackgroundColor(0xFF555555.toInt())
-            binding.tvOverlayB.text = "Vui lòng cắm Camera UVC #2 (RGB)"
+            binding.tvOverlayB.text = "Vui lòng cắm Camera UVC RGB"
             binding.tvOverlayB.visibility = View.VISIBLE
+            setVerificationState(VerificationState.CAMERA_CONNECTING)
         } else {
             binding.tvDeviceInfoB.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeB.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeB.setBackgroundColor(0xFFE65100.toInt())
-                binding.tvOverlayB.text = "Bấm '▶️ Mở' để xin quyền USB"
+                binding.tvOverlayB.text = "Bấm '⚙️ Kỹ thuật' để cấp quyền USB Camera"
                 binding.tvOverlayB.visibility = View.VISIBLE
+                setVerificationState(VerificationState.CAMERA_CONNECTING)
             } else if (mCameraB?.isCameraOpened() != true) {
                 binding.tvStatusBadgeB.text = "SẴN SÀNG"
                 binding.tvStatusBadgeB.setBackgroundColor(0xFF1565C0.toInt())
-                binding.tvOverlayB.text = "Bấm '▶️ Mở' để xem luồng video"
+                binding.tvOverlayB.text = "Camera sẵn sàng. Đang kết nối luồng video..."
                 binding.tvOverlayB.visibility = View.VISIBLE
+                // Tự động kết nối Camera B nếu đã có quyền
+                connectCameraB()
             }
         }
     }
@@ -404,7 +518,7 @@ class KioskCameraFragment : Fragment() {
                             appendLog("❌ Camera A Lỗi: ${msg ?: "Không xác định"}")
                             binding.tvStatusBadgeA.text = "LỖI"
                             binding.tvStatusBadgeA.setBackgroundColor(0xFFB71C1C.toInt())
-                            binding.tvOverlayA.text = "Lỗi Camera A: ${msg ?: "Không mở được stream"}"
+                            binding.tvOverlayA.text = "Lỗi Cam A: ${msg ?: "Lỗi"}"
                             binding.tvOverlayA.visibility = View.VISIBLE
                         }
                     }
@@ -450,6 +564,7 @@ class KioskCameraFragment : Fragment() {
                             binding.tvStatusBadgeB.setBackgroundColor(0xFF2E7D32.toInt())
                             binding.tvOverlayB.visibility = View.GONE
                             binding.tvFaceStatusB.text = "👤 ML Kit: Đang quét khuôn mặt..."
+                            setVerificationState(VerificationState.IDLE)
                         }
                         ICameraStateCallBack.State.CLOSED -> {
                             appendLog("🔴 Camera B: Đã đóng.")
@@ -459,6 +574,7 @@ class KioskCameraFragment : Fragment() {
                             binding.tvOverlayB.visibility = View.VISIBLE
                             binding.faceOverlayB.clear()
                             binding.tvFaceStatusB.text = "👤 ML Kit: Camera B đã đóng"
+                            setVerificationState(VerificationState.CAMERA_CONNECTING)
                         }
                         ICameraStateCallBack.State.ERROR -> {
                             appendLog("❌ Camera B Lỗi: ${msg ?: "Không xác định"}")
@@ -468,6 +584,7 @@ class KioskCameraFragment : Fragment() {
                             binding.tvOverlayB.visibility = View.VISIBLE
                             binding.faceOverlayB.clear()
                             binding.tvFaceStatusB.text = "⚠️ ML Kit: Tạm dừng do lỗi Camera B"
+                            setVerificationState(VerificationState.CAMERA_CONNECTING)
                         }
                     }
                 }
@@ -526,6 +643,10 @@ class KioskCameraFragment : Fragment() {
                                 latestNv21Bytes = null
                                 binding.faceOverlayB.clear()
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
+
+                                if (currentVerificationState == VerificationState.DETECTING || currentVerificationState == VerificationState.VERIFYING) {
+                                    setVerificationState(VerificationState.IDLE)
+                                }
                             } else {
                                 val face = faces[0]
                                 latestDetectedBox = face.boundingBox
@@ -535,6 +656,10 @@ class KioskCameraFragment : Fragment() {
 
                                 binding.faceOverlayB.setFaces(faces, width, height)
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
+
+                                if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile) {
+                                    setVerificationState(VerificationState.DETECTING)
+                                }
 
                                 val ctx = context
                                 if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile) {
@@ -775,6 +900,8 @@ class KioskCameraFragment : Fragment() {
         val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box) ?: return
 
         try {
+            setVerificationState(VerificationState.VERIFYING)
+
             val liveEmbedding = model.extractEmbedding(croppedFace)
             croppedFace.recycle()
 
@@ -786,34 +913,49 @@ class KioskCameraFragment : Fragment() {
                 val student = StudentRepository.findStudentById(matchedUser.studentId)
 
                 if (student != null) {
+                    // Lock verification callback to prevent duplicate sessions
                     isNavigatingToProfile = true
+                    isAutoVerificationEnabled = false
+
                     val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${student.studentId} | Họ tên: ${student.fullName}\nLớp: ${student.className} | Khoa: ${student.faculty} | Tương đồng: $percentStr"
                     binding.tvRecognitionResultB.text = resultText
                     binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
 
-                    // Start session and navigate to Student Profile Page
-                    KioskSessionManager.startSession(student)
-                    appendLog("✅ Tự động chuyển sang Trang cá nhân cho sinh viên: ${student.fullName} (${student.studentId})")
+                    // Show success status card & overlay banner
+                    setVerificationState(VerificationState.SUCCESS, student)
 
+                    // Start kiosk session with 90s inactivity timeout
+                    KioskSessionManager.startSession(student)
+                    appendLog("✅ Xác thực thành công: ${student.fullName} (${student.studentId}) - Chuyển sang Trang cá nhân sau 1.0 giây.")
+
+                    // Hold for exactly 1000ms (0.8s - 1.2s requirement)
                     mainHandler.postDelayed({
                         activity?.runOnUiThread {
-                            if (_binding != null) {
-                                isAutoVerificationEnabled = false
-                                (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
+                            if (_binding != null && isAdded) {
+                                try {
+                                    (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
+                                } catch (e: Exception) {
+                                    appendLog("❌ Lỗi chuyển hướng trang: ${e.message}")
+                                    isNavigatingToProfile = false
+                                    setVerificationState(VerificationState.IDLE)
+                                }
                             }
                         }
-                    }, 500)
+                    }, 1000)
                 } else {
                     val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${matchedUser.studentId} | Tên: ${matchedUser.name} | Độ tương đồng: $percentStr"
                     binding.tvRecognitionResultB.text = resultText
                     binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+                    setVerificationState(VerificationState.UNRECOGNIZED)
                 }
             } else {
                 binding.tvRecognitionResultB.text = "❌ Không tìm thấy thông tin sinh viên phù hợp trong DB"
                 binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
+                setVerificationState(VerificationState.UNRECOGNIZED)
             }
         } catch (e: Exception) {
             binding.tvRecognitionResultB.text = "⚠️ Lỗi so khớp: ${e.message}"
+            setVerificationState(VerificationState.UNRECOGNIZED)
         }
     }
 
