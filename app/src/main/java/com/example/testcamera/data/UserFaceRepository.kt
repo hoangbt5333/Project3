@@ -210,6 +210,8 @@ object UserFaceRepository {
         }
 
         if (normA == 0f || normB == 0f) return 0f
-        return (dotProduct / (sqrt(normA.toDouble()) * sqrt(normB.toDouble()))).toFloat()
+        val denom = sqrt(normA.toDouble()) * sqrt(normB.toDouble())
+        if (denom == 0.0 || denom.isNaN()) return 0f
+        return (dotProduct / denom).toFloat().coerceIn(-1.0f, 1.0f)
     }
 }

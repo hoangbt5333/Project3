@@ -40,10 +40,10 @@ class StudentProfileFragment : Fragment() {
         view.findViewById<TextView>(R.id.tvStudentClass)?.text = "Lớp: ${student.className} • Khoa: ${student.faculty}"
         view.findViewById<TextView>(R.id.tvStudentEmail)?.text = "Email: ${student.email}"
 
-        // Service 1: Xem Bảng Điểm
+        // Service 1: Xem Bảng Điểm Học Tập
         val openGradesAction = View.OnClickListener {
             KioskSessionManager.touchInactivity()
-            openServicePlaceholder("Xem Bảng Điểm Học Tập")
+            (activity as? MainActivity)?.navigateToFragment(StudentTranscriptFragment(), addToBackStack = true)
         }
         view.findViewById<Button>(R.id.btnViewGrades)?.setOnClickListener(openGradesAction)
         view.findViewById<View>(R.id.cardBtnViewGrades)?.setOnClickListener(openGradesAction)

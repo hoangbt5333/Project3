@@ -42,6 +42,8 @@ class FaceNetModel(context: Context) {
         return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
     }
 
+    fun isModelReady(): Boolean = interpreter != null
+
     fun extractEmbedding(faceBitmap: Bitmap): FloatArray {
         val scaledBitmap = if (faceBitmap.width != INPUT_IMAGE_SIZE || faceBitmap.height != INPUT_IMAGE_SIZE) {
             Bitmap.createScaledBitmap(faceBitmap, INPUT_IMAGE_SIZE, INPUT_IMAGE_SIZE, true)
@@ -95,13 +97,23 @@ class FaceNetModel(context: Context) {
         bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
         val step = (intValues.size / EMBEDDING_SIZE).coerceAtLeast(1)
+        var sum = 0f
         for (i in 0 until EMBEDDING_SIZE) {
             val idx = (i * step).coerceAtMost(intValues.size - 1)
             val px = intValues[idx]
             val r = ((px shr 16) and 0xFF) / 255.0f
             val g = ((px shr 8) and 0xFF) / 255.0f
             val b = (px and 0xFF) / 255.0f
-            outputArray[i] = (r * 0.299f + g * 0.587f + b * 0.114f)
+            val lum = (r * 0.299f + g * 0.587f + b * 0.114f)
+            outputArray[i] = lum
+            sum += lum
+        }
+
+        // Zero-mean centering: remove common DC illumination component
+        // This prevents different faces from artificially correlating at >0.9 similarity
+        val mean = sum / EMBEDDING_SIZE
+        for (i in 0 until EMBEDDING_SIZE) {
+            outputArray[i] -= mean
         }
     }
 
@@ -111,7 +123,7 @@ class FaceNetModel(context: Context) {
             sum += v * v
         }
         val norm = sqrt(sum.toDouble()).toFloat()
-        if (norm == 0f) return embedding
+        if (norm == 0f || norm.isNaN()) return embedding
         for (i in embedding.indices) {
             embedding[i] /= norm
         }

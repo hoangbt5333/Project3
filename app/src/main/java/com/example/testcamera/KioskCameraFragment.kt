@@ -164,7 +164,11 @@ class KioskCameraFragment : Fragment() {
             val ctx = context ?: return
             faceNetModel = FaceNetModel(ctx)
             updateRecognitionStatusUI()
-            appendLog("✅ Khởi tạo Face Recognition Model (MobileFaceNet) thành công.")
+            if (faceNetModel?.isModelReady() == true) {
+                appendLog("✅ Khởi tạo Face Recognition Model (MobileFaceNet TFLite) thành công.")
+            } else {
+                appendLog("ℹ️ Khởi tạo Face Recognition Model (Chế độ trích xuất vi phân - sẵn sàng nạp MobileFaceNet TFLite).")
+            }
         } catch (e: Exception) {
             appendLog("⚠️ Khởi tạo Face Recognition Model: ${e.message}")
         }
@@ -662,7 +666,7 @@ class KioskCameraFragment : Fragment() {
                                 }
 
                                 val ctx = context
-                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile) {
+                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile && currentVerificationState != VerificationState.UNRECOGNIZED) {
                                     performFaceVerification(frameBytes, width, height, face.boundingBox)
                                 }
                             }
@@ -896,8 +900,26 @@ class KioskCameraFragment : Fragment() {
     ) {
         if (isNavigatingToProfile) return
 
-        val model = faceNetModel ?: return
-        val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box) ?: return
+        val model = faceNetModel
+        if (model == null) {
+            appendLog("⚠️ [FR] FaceNetModel chưa khởi tạo - từ chối xác thực")
+            return
+        }
+
+        val ctx = context ?: return
+        val userCount = UserFaceRepository.getUserCount(ctx)
+        if (userCount == 0) {
+            appendLog("⚠️ [FR] Chưa có sinh viên nào đăng ký trong DB - không thực hiện so khớp")
+            return
+        }
+
+        appendLog("🔍 [FR] Bắt đầu xác thực: Crop ${box.width()}x${box.height()}px | DB có $userCount sinh viên | Ngưỡng: 65.0%")
+
+        val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
+        if (croppedFace == null) {
+            appendLog("⚠️ [FR] Tiền xử lý thất bại: crop kích thước không hợp lệ (<10px) - từ chối xác thực")
+            return
+        }
 
         try {
             setVerificationState(VerificationState.VERIFYING)
@@ -905,11 +927,27 @@ class KioskCameraFragment : Fragment() {
             val liveEmbedding = model.extractEmbedding(croppedFace)
             croppedFace.recycle()
 
-            val matchResult = UserFaceRepository.findBestMatch(liveEmbedding, threshold = 0.65f)
+            // Validate embedding vector
+            val isEmbeddingValid = liveEmbedding.size == FaceNetModel.EMBEDDING_SIZE &&
+                    liveEmbedding.any { it != 0f } &&
+                    liveEmbedding.none { it.isNaN() }
+
+            if (!isEmbeddingValid) {
+                appendLog("⚠️ [FR] Trích xuất embedding thất bại: vector rỗng, toàn 0 hoặc NaN - từ chối xác thực")
+                binding.tvRecognitionResultB.text = "⚠️ Embedding không hợp lệ"
+                binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
+                setVerificationState(VerificationState.UNRECOGNIZED)
+                return
+            }
+
+            val threshold = 0.65f
+            val matchResult = UserFaceRepository.findBestMatch(liveEmbedding, threshold = threshold)
 
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
                 val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
+                appendLog("✅ [FR] Kết quả MATCH: MSSV=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
+
                 val student = StudentRepository.findStudentById(matchedUser.studentId)
 
                 if (student != null) {
@@ -926,7 +964,7 @@ class KioskCameraFragment : Fragment() {
 
                     // Start kiosk session with 90s inactivity timeout
                     KioskSessionManager.startSession(student)
-                    appendLog("✅ Xác thực thành công: ${student.fullName} (${student.studentId}) - Chuyển sang Trang cá nhân sau 1.0 giây.")
+                    appendLog("✅ [FR] Xác thực thành công: ${student.fullName} (${student.studentId}) - Chuyển sang Trang cá nhân sau 1.0 giây.")
 
                     // Hold for exactly 1000ms (0.8s - 1.2s requirement)
                     mainHandler.postDelayed({
@@ -935,7 +973,7 @@ class KioskCameraFragment : Fragment() {
                                 try {
                                     (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
                                 } catch (e: Exception) {
-                                    appendLog("❌ Lỗi chuyển hướng trang: ${e.message}")
+                                    appendLog("❌ [FR] Lỗi chuyển hướng trang: ${e.message}")
                                     isNavigatingToProfile = false
                                     setVerificationState(VerificationState.IDLE)
                                 }
@@ -943,17 +981,20 @@ class KioskCameraFragment : Fragment() {
                         }
                     }, 1000)
                 } else {
-                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${matchedUser.studentId} | Tên: ${matchedUser.name} | Độ tương đồng: $percentStr"
+                    appendLog("⚠️ [FR] NO MATCH: Mẫu khuôn mặt khớp ID ${matchedUser.studentId} nhưng không có dữ liệu trong StudentRepository")
+                    val resultText = "⚠️ Không tìm thấy hồ sơ sinh viên MSSV: ${matchedUser.studentId}"
                     binding.tvRecognitionResultB.text = resultText
-                    binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+                    binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
                     setVerificationState(VerificationState.UNRECOGNIZED)
                 }
             } else {
+                appendLog("❌ [FR] Kết quả NO MATCH: Không có sinh viên nào trong DB đạt ngưỡng ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
                 binding.tvRecognitionResultB.text = "❌ Không tìm thấy thông tin sinh viên phù hợp trong DB"
                 binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
                 setVerificationState(VerificationState.UNRECOGNIZED)
             }
         } catch (e: Exception) {
+            appendLog("❌ [FR] Ngoại lệ khi xác thực: ${e.message}")
             binding.tvRecognitionResultB.text = "⚠️ Lỗi so khớp: ${e.message}"
             setVerificationState(VerificationState.UNRECOGNIZED)
         }
