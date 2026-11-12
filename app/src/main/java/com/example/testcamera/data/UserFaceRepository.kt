@@ -26,7 +26,22 @@ data class UserFaceModel(
     }
 }
 
+data class FaceMatchResult(
+    val user: UserFaceModel,
+    val similarity: Float,
+    val secondSimilarity: Float = -1f,
+    val margin: Float = 1.0f
+) {
+    // Backward compatibility with Pair<UserFaceModel, Float>
+    val first: UserFaceModel get() = user
+    val second: Float get() = similarity
+}
+
 object UserFaceRepository {
+
+    const val DEFAULT_MATCH_THRESHOLD = 0.70f
+    const val DEFAULT_MIN_MARGIN = 0.08f
+    const val DEFAULT_DUPLICATE_THRESHOLD = 0.75f
 
     private const val DB_FILE_NAME = "registered_faces.json"
     private val userList = mutableListOf<UserFaceModel>()
@@ -55,9 +70,24 @@ object UserFaceRepository {
                 val timestamp = obj.optLong("timestamp", System.currentTimeMillis())
 
                 val embArr = obj.getJSONArray("embedding")
+                if (embArr.length() != 192) {
+                    try {
+                        android.util.Log.w("UserFaceRepository", "⚠️ Skipping legacy or incompatible embedding for student: $studentId (dimension=${embArr.length()}, expected 192)")
+                    } catch (_: Exception) {}
+                    continue
+                }
+
                 val embedding = FloatArray(embArr.length())
                 for (j in 0 until embArr.length()) {
                     embedding[j] = embArr.getDouble(j).toFloat()
+                }
+
+                // Check for NaN or all zeros
+                if (embedding.any { it.isNaN() } || embedding.all { it == 0f }) {
+                    try {
+                        android.util.Log.w("UserFaceRepository", "⚠️ Skipping corrupt embedding (NaN or all zeros) for student: $studentId")
+                    } catch (_: Exception) {}
+                    continue
                 }
 
                 userList.add(UserFaceModel(studentId, name, embedding, timestamp))
@@ -95,6 +125,10 @@ object UserFaceRepository {
     }
 
     fun registerStudentFace(context: Context, studentId: String, name: String, embedding: FloatArray): UserFaceModel {
+        require(embedding.size == 192) { "Embedding dimension must be exactly 192 (got ${embedding.size})" }
+        require(!embedding.any { it.isNaN() }) { "Embedding contains NaN values" }
+        require(embedding.any { it != 0f }) { "Embedding cannot be all zeros" }
+
         init(context)
         val cleanId = studentId.trim()
         val cleanName = name.trim()
@@ -175,23 +209,72 @@ object UserFaceRepository {
         }
     }
 
-    fun findBestMatch(liveEmbedding: FloatArray, threshold: Float = 0.65f): Pair<UserFaceModel, Float>? {
+    fun resetDatabase(context: Context) {
+        clearAllUsers(context)
+        isInitialized = false
+        init(context)
+    }
+
+    fun addUserForTesting(user: UserFaceModel) {
+        userList.add(user)
+    }
+
+    fun clearUsersForTesting() {
+        userList.clear()
+    }
+
+    fun findBestMatch(
+        liveEmbedding: FloatArray,
+        threshold: Float = DEFAULT_MATCH_THRESHOLD,
+        minMargin: Float = DEFAULT_MIN_MARGIN
+    ): FaceMatchResult? {
         if (userList.isEmpty() || liveEmbedding.isEmpty()) return null
 
-        var bestUser: UserFaceModel? = null
-        var maxSimilarity = -1f
+        var top1User: UserFaceModel? = null
+        var top1Score = -1f
+
+        var top2User: UserFaceModel? = null
+        var top2Score = -1f
 
         for (user in userList) {
             val similarity = calculateCosineSimilarity(liveEmbedding, user.embedding)
-            if (similarity > maxSimilarity) {
-                maxSimilarity = similarity
-                bestUser = user
+            if (similarity > top1Score) {
+                // Shift top1 to top2
+                top2Score = top1Score
+                top2User = top1User
+
+                top1Score = similarity
+                top1User = user
+            } else if (similarity > top2Score) {
+                top2Score = similarity
+                top2User = user
             }
         }
 
-        return if (bestUser != null && maxSimilarity >= threshold) {
-            Pair(bestUser, maxSimilarity)
+        if (top1User == null || top1Score < threshold) {
+            return null
+        }
+
+        val margin = if (userList.size > 1 && top2Score > -1f) (top1Score - top2Score) else 1.0f
+
+        // When multiple users are enrolled, require sufficient margin between Rank-1 and Rank-2
+        // to prevent false acceptance on ambiguous/impostor faces
+        return if (userList.size <= 1 || margin >= minMargin) {
+            FaceMatchResult(
+                user = top1User,
+                similarity = top1Score,
+                secondSimilarity = top2Score,
+                margin = margin
+            )
         } else {
+            try {
+                android.util.Log.w(
+                    "UserFaceRepository",
+                    "⚠️ Ambiguous match rejected: Top-1=${top1User.studentId} ($top1Score), Top-2=${top2User?.studentId} ($top2Score), Margin=$margin < $minMargin"
+                )
+            } catch (_: Exception) {
+                // Ignore during unit tests without android log mock
+            }
             null
         }
     }

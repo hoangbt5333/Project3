@@ -40,6 +40,14 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    androidResources {
+        noCompress += "tflite"
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

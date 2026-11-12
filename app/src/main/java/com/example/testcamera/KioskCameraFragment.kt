@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.example.testcamera.data.AccountRepository
@@ -191,7 +192,8 @@ class KioskCameraFragment : Fragment() {
             if (faceNetModel?.isModelReady() == true) {
                 appendLog("✅ Khởi tạo Face Recognition Model (MobileFaceNet TFLite) thành công.")
             } else {
-                appendLog("ℹ️ Khởi tạo Face Recognition Model (Chế độ trích xuất vi phân - sẵn sàng nạp MobileFaceNet TFLite).")
+                val errorMsg = faceNetModel?.loadError ?: "Không tìm thấy tệp mobilefacenet.tflite trong assets"
+                appendLog("❌ [LỖI TFLITE] Mô hình chưa sẵn sàng: $errorMsg")
             }
         } catch (e: Exception) {
             appendLog("⚠️ Khởi tạo Face Recognition Model: ${e.message}")
@@ -542,6 +544,16 @@ class KioskCameraFragment : Fragment() {
         }
     }
 
+    private fun updatePreviewAspectRatio(surfaceView: View, width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val params = surfaceView.layoutParams as? ConstraintLayout.LayoutParams ?: return
+        val ratio = "$width:$height"
+        if (params.dimensionRatio != ratio) {
+            params.dimensionRatio = ratio
+            surfaceView.layoutParams = params
+        }
+    }
+
     private fun openCameraPanelA(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
         closeCameraA()
 
@@ -561,6 +573,9 @@ class KioskCameraFragment : Fragment() {
                     when (code) {
                         ICameraStateCallBack.State.OPENED -> {
                             appendLog("🟢 Camera A: Đã mở luồng video thành công!")
+                            self.getPreviewSize()?.let { size ->
+                                updatePreviewAspectRatio(binding.uvcSurfaceViewA, size.width, size.height)
+                            }
                             binding.tvStatusBadgeA.text = "STREAMING"
                             binding.tvStatusBadgeA.setBackgroundColor(0xFF2E7D32.toInt())
                             binding.tvOverlayA.visibility = View.GONE
@@ -618,6 +633,9 @@ class KioskCameraFragment : Fragment() {
                     when (code) {
                         ICameraStateCallBack.State.OPENED -> {
                             appendLog("🟢 Camera B (RGB): Đã mở luồng video thành công!")
+                            self.getPreviewSize()?.let { size ->
+                                updatePreviewAspectRatio(binding.uvcSurfaceViewB, size.width, size.height)
+                            }
                             binding.tvStatusBadgeB.text = "STREAMING"
                             binding.tvStatusBadgeB.setBackgroundColor(0xFF2E7D32.toInt())
                             binding.tvOverlayB.visibility = View.GONE
@@ -851,8 +869,9 @@ class KioskCameraFragment : Fragment() {
         box: Rect
     ) {
         val model = faceNetModel
-        if (model == null) {
-            Toast.makeText(ctx, "Model Face Recognition chưa sẵn sàng!", Toast.LENGTH_SHORT).show()
+        if (model == null || !model.isModelReady()) {
+            Toast.makeText(ctx, "Model Face Recognition chưa sẵn sàng hoặc lỗi TFLite!", Toast.LENGTH_SHORT).show()
+            appendLog("❌ [ĐĂNG KÝ] Không thể đăng ký: Model FaceNet chưa sẵn sàng")
             return
         }
 
@@ -883,8 +902,8 @@ class KioskCameraFragment : Fragment() {
             return
         }
 
-        // 2. Check duplicate Face Embedding (threshold 0.72)
-        val duplicateFaceMatch = UserFaceRepository.checkDuplicateFace(embedding, duplicateThreshold = 0.72f)
+        // 2. Check duplicate Face Embedding (threshold 0.75)
+        val duplicateFaceMatch = UserFaceRepository.checkDuplicateFace(embedding, duplicateThreshold = UserFaceRepository.DEFAULT_DUPLICATE_THRESHOLD)
         if (duplicateFaceMatch != null) {
             val (dupUser, similarity) = duplicateFaceMatch
             val dupAccount = AccountRepository.findAccountById(dupUser.studentId)
@@ -955,8 +974,8 @@ class KioskCameraFragment : Fragment() {
         if (isNavigatingToProfile) return
 
         val model = faceNetModel
-        if (model == null) {
-            appendLog("⚠️ [FR] FaceNetModel chưa khởi tạo - từ chối xác thực")
+        if (model == null || !model.isModelReady()) {
+            appendLog("⚠️ [FR] FaceNetModel chưa sẵn sàng hoặc lỗi TFLite - từ chối xác thực")
             return
         }
 
@@ -967,11 +986,12 @@ class KioskCameraFragment : Fragment() {
             return
         }
 
-        appendLog("🔍 [FR] Bắt đầu xác thực: Crop ${box.width()}x${box.height()}px | DB có $userCount sinh viên | Ngưỡng: 65.0%")
+        val threshold = UserFaceRepository.DEFAULT_MATCH_THRESHOLD
+        appendLog("🔍 [FR] Bắt đầu xác thực: Crop ${box.width()}x${box.height()}px | DB có $userCount sinh viên | Ngưỡng: ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
 
         val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
         if (croppedFace == null) {
-            appendLog("⚠️ [FR] Tiền xử lý thất bại: crop kích thước không hợp lệ (<10px) - từ chối xác thực")
+            appendLog("⚠️ [FR] Tiền xử lý thất bại: crop kích thước không hợp lệ (<40px) - từ chối xác thực")
             return
         }
 
@@ -994,13 +1014,13 @@ class KioskCameraFragment : Fragment() {
                 return
             }
 
-            val threshold = 0.65f
             val matchResult = UserFaceRepository.findBestMatch(liveEmbedding, threshold = threshold)
 
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
                 val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
-                appendLog("✅ [FR] Kết quả MATCH: ID=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
+                val marginStr = String.format(Locale.getDefault(), "%.2f", matchResult.margin)
+                appendLog("✅ [FR] Kết quả MATCH: ID=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)} | Margin=$marginStr")
 
                 // Tra cứu tài khoản theo định danh ID
                 val account = AccountRepository.findAccountById(matchedUser.studentId)

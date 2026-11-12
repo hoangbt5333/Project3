@@ -16,9 +16,12 @@ class FaceNetModel(context: Context) {
         const val INPUT_IMAGE_SIZE = 112
         const val EMBEDDING_SIZE = 192
         private const val MODEL_FILENAME = "mobilefacenet.tflite"
+        private const val TAG = "FaceNetModel"
     }
 
     private var interpreter: Interpreter? = null
+    var loadError: String? = null
+        private set
 
     init {
         try {
@@ -27,9 +30,12 @@ class FaceNetModel(context: Context) {
                 setNumThreads(4)
             }
             interpreter = Interpreter(modelBuffer, options)
-        } catch (_: Exception) {
-            // Model file will be loaded when added to assets folder
+            loadError = null
+            android.util.Log.i(TAG, "✅ MobileFaceNet TFLite interpreter initialized successfully.")
+        } catch (e: Exception) {
             interpreter = null
+            loadError = e.message ?: e.toString()
+            android.util.Log.e(TAG, "❌ Failed to load MobileFaceNet TFLite model: $loadError", e)
         }
     }
 
@@ -45,6 +51,12 @@ class FaceNetModel(context: Context) {
     fun isModelReady(): Boolean = interpreter != null
 
     fun extractEmbedding(faceBitmap: Bitmap): FloatArray {
+        val activeInterpreter = interpreter
+        if (activeInterpreter == null) {
+            android.util.Log.e(TAG, "⚠️ extractEmbedding rejected: Model interpreter is not ready! Error: $loadError")
+            return FloatArray(0)
+        }
+
         val scaledBitmap = if (faceBitmap.width != INPUT_IMAGE_SIZE || faceBitmap.height != INPUT_IMAGE_SIZE) {
             Bitmap.createScaledBitmap(faceBitmap, INPUT_IMAGE_SIZE, INPUT_IMAGE_SIZE, true)
         } else {
@@ -54,14 +66,16 @@ class FaceNetModel(context: Context) {
         val byteBuffer = convertBitmapToByteBuffer(scaledBitmap)
         val embedding = FloatArray(EMBEDDING_SIZE)
 
-        val activeInterpreter = interpreter
-        if (activeInterpreter != null) {
+        try {
             val outputMap = Array(1) { FloatArray(EMBEDDING_SIZE) }
             activeInterpreter.run(byteBuffer, outputMap)
             System.arraycopy(outputMap[0], 0, embedding, 0, EMBEDDING_SIZE)
-        } else {
-            // Fallback feature vector calculation from pixel channels if tflite asset is missing
-            extractFallbackEmbedding(scaledBitmap, embedding)
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "❌ Error executing TFLite inference: ${e.message}", e)
+            if (scaledBitmap != faceBitmap) {
+                scaledBitmap.recycle()
+            }
+            return FloatArray(0)
         }
 
         if (scaledBitmap != faceBitmap) {
@@ -83,10 +97,10 @@ class FaceNetModel(context: Context) {
         for (i in 0 until INPUT_IMAGE_SIZE) {
             for (j in 0 until INPUT_IMAGE_SIZE) {
                 val valPixel = intValues[pixel++]
-                // Normalize RGB pixel values to [-1, 1]
-                imgData.putFloat((((valPixel shr 16) and 0xFF) - 127.5f) / 127.5f)
-                imgData.putFloat((((valPixel shr 8) and 0xFF) - 127.5f) / 127.5f)
-                imgData.putFloat(((valPixel and 0xFF) - 127.5f) / 127.5f)
+                // Normalize RGB pixel values to [-1, 1] using standard MobileFaceNet formula
+                imgData.putFloat((((valPixel shr 16) and 0xFF) - 127.5f) / 128.0f)
+                imgData.putFloat((((valPixel shr 8) and 0xFF) - 127.5f) / 128.0f)
+                imgData.putFloat(((valPixel and 0xFF) - 127.5f) / 128.0f)
             }
         }
         return imgData

@@ -138,4 +138,44 @@ class FaceRecognitionPipelineTest {
         assertEquals(false, isNanValid)
         assertEquals(true, isValidValid)
     }
+
+    @Test
+    fun testScoreMarginDisambiguationAndAcceptance() {
+        UserFaceRepository.clearUsersForTesting()
+
+        val embA = generateSimulatedFaceEmbedding(101L)
+        val embB = generateSimulatedFaceEmbedding(202L)
+
+        val userA = UserFaceModel("20231001", "Sinh viên A", embA)
+        val userB = UserFaceModel("20231002", "Sinh viên B", embB)
+
+        UserFaceRepository.addUserForTesting(userA)
+        UserFaceRepository.addUserForTesting(userB)
+
+        // Case 1: High confidence match on User A (large margin)
+        // Live vector is very close to A (sim ~0.95), far from B
+        val liveCloseToA = FloatArray(192) { i -> embA[i] + (Random(42).nextFloat() - 0.5f) * 0.02f }
+        l2Normalize(liveCloseToA)
+
+        val matchA = UserFaceRepository.findBestMatch(liveCloseToA, threshold = 0.70f, minMargin = 0.08f)
+        assertNotNull("Clear match must be accepted", matchA)
+        assertEquals("20231001", matchA?.user?.studentId)
+        assertTrue("Margin must be significant (> 0.20): ${matchA?.margin}", (matchA?.margin ?: 0f) > 0.20f)
+
+        // Case 2: Ambiguous synthetic vector halfway between User A and User B
+        // Sim(A) and Sim(B) will be nearly equal
+        val halfwayVector = FloatArray(192) { i -> (embA[i] + embB[i]) / 2.0f }
+        l2Normalize(halfwayVector)
+
+        val simA = UserFaceRepository.calculateCosineSimilarity(halfwayVector, embA)
+        val simB = UserFaceRepository.calculateCosineSimilarity(halfwayVector, embB)
+        println("Halfway SimA: $simA, SimB: $simB, Diff: ${Math.abs(simA - simB)}")
+
+        // If threshold is set so both pass, margin check must reject it!
+        val lowerThresh = minOf(simA, simB) - 0.05f
+        val ambiguousMatch = UserFaceRepository.findBestMatch(halfwayVector, threshold = lowerThresh, minMargin = 0.08f)
+        assertNull("Ambiguous match with margin < 0.08 must be strictly rejected", ambiguousMatch)
+
+        UserFaceRepository.clearUsersForTesting()
+    }
 }

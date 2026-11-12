@@ -28,24 +28,65 @@ object NV21ToBitmapConverter {
         width: Int,
         height: Int,
         boundingBox: Rect,
-        targetSize: Int = 112
+        targetSize: Int = 112,
+        paddingFactor: Float = 0.20f
     ): Bitmap? {
         if (width <= 0 || height <= 0 || nv21.isEmpty()) return null
 
-        val cropLeft = boundingBox.left.coerceIn(0, width - 1)
-        val cropTop = boundingBox.top.coerceIn(0, height - 1)
-        val cropRight = boundingBox.right.coerceIn(cropLeft + 1, width)
-        val cropBottom = boundingBox.bottom.coerceIn(cropTop + 1, height)
+        val rawWidth = boundingBox.width().coerceAtLeast(1)
+        val rawHeight = boundingBox.height().coerceAtLeast(1)
 
-        val cropWidth = cropRight - cropLeft
-        val cropHeight = cropBottom - cropTop
+        // Minimum face size threshold for biometric recognition
+        if (rawWidth < 40 || rawHeight < 40) return null
 
-        if (cropWidth < 10 || cropHeight < 10) return null
+        val centerX = boundingBox.exactCenterX()
+        val centerY = boundingBox.exactCenterY()
+
+        // Create square crop bounding box with padding (1:1 aspect ratio to avoid distortion)
+        val maxDim = maxOf(rawWidth, rawHeight)
+        val paddedSide = (maxDim * (1.0f + paddingFactor)).coerceAtMost(minOf(width, height).toFloat())
+        val halfSide = paddedSide / 2.0f
+
+        var cropLeft = (centerX - halfSide).toInt()
+        var cropTop = (centerY - halfSide).toInt()
+        var cropRight = (centerX + halfSide).toInt()
+        var cropBottom = (centerY + halfSide).toInt()
+
+        // Shift box if touching image edges to preserve square aspect ratio
+        if (cropLeft < 0) {
+            cropRight += -cropLeft
+            cropLeft = 0
+        }
+        if (cropTop < 0) {
+            cropBottom += -cropTop
+            cropTop = 0
+        }
+        if (cropRight > width) {
+            val shift = cropRight - width
+            cropLeft = (cropLeft - shift).coerceAtLeast(0)
+            cropRight = width
+        }
+        if (cropBottom > height) {
+            val shift = cropBottom - height
+            cropTop = (cropTop - shift).coerceAtLeast(0)
+            cropBottom = height
+        }
+
+        // Align to even numbers for NV21 2x2 chroma subsampling (prevent UV color shifting)
+        val evenLeft = (cropLeft and 1.inv()).coerceIn(0, width - 2)
+        val evenTop = (cropTop and 1.inv()).coerceIn(0, height - 2)
+        val evenRight = (cropRight and 1.inv()).coerceIn(evenLeft + 2, width)
+        val evenBottom = (cropBottom and 1.inv()).coerceIn(evenTop + 2, height)
+
+        val cropWidth = evenRight - evenLeft
+        val cropHeight = evenBottom - evenTop
+
+        if (cropWidth < 40 || cropHeight < 40) return null
 
         return try {
             val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
             val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(cropLeft, cropTop, cropRight, cropBottom), 90, out)
+            yuvImage.compressToJpeg(Rect(evenLeft, evenTop, evenRight, evenBottom), 95, out)
             val imageBytes = out.toByteArray()
             val faceBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) ?: return null
 
