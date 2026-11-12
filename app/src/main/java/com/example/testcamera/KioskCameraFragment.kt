@@ -20,11 +20,15 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.example.testcamera.data.AccountRepository
+import com.example.testcamera.data.AccountStatus
 import com.example.testcamera.data.KioskSessionManager
 import com.example.testcamera.data.Student
 import com.example.testcamera.data.StudentRepository
+import com.example.testcamera.data.UserAccount
 import com.example.testcamera.data.UserFaceModel
 import com.example.testcamera.data.UserFaceRepository
+import com.example.testcamera.data.UserRole
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
 import com.example.testcamera.ml.FaceNetModel
 import com.example.testcamera.util.NV21ToBitmapConverter
@@ -49,13 +53,27 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class KioskCameraFragment : Fragment() {
 
+    companion object {
+        private const val ARG_OPEN_IN_TECH_MODE = "arg_open_in_tech_mode"
+
+        fun newInstance(openInTechMode: Boolean = false): KioskCameraFragment {
+            val fragment = KioskCameraFragment()
+            val args = Bundle().apply {
+                putBoolean(ARG_OPEN_IN_TECH_MODE, openInTechMode)
+            }
+            fragment.arguments = args
+            return fragment
+        }
+    }
+
     enum class VerificationState {
         CAMERA_CONNECTING,
         IDLE,
         DETECTING,
         VERIFYING,
         SUCCESS,
-        UNRECOGNIZED
+        UNRECOGNIZED,
+        ACCOUNT_DISABLED
     }
 
     private var _binding: FragmentKioskCameraBinding? = null
@@ -138,6 +156,12 @@ class KioskCameraFragment : Fragment() {
         setupListeners()
 
         setVerificationState(VerificationState.CAMERA_CONNECTING)
+
+        val openInTech = arguments?.getBoolean(ARG_OPEN_IN_TECH_MODE, false) ?: false
+        if (openInTech) {
+            isTechModeVisible = false
+            toggleTechMode()
+        }
 
         mainHandler.post(fpsRunnable)
     }
@@ -225,6 +249,11 @@ class KioskCameraFragment : Fragment() {
         }
 
         binding.btnToggleTechMode.setOnClickListener {
+            if (KioskSessionManager.isSessionActive && !KioskSessionManager.hasTechAccess()) {
+                Toast.makeText(context, "⛔ Quyền truy cập bị từ chối: Chức năng Kỹ thuật chỉ dành cho Quản trị viên/Kỹ thuật viên!", Toast.LENGTH_SHORT).show()
+                appendLog("⛔ [RBAC] Từ chối truy cập Kỹ thuật: Phiên làm việc của sinh viên không có quyền.")
+                return@setOnClickListener
+            }
             toggleTechMode()
         }
 
@@ -247,6 +276,14 @@ class KioskCameraFragment : Fragment() {
         binding.btnRegisterFaceB.setOnClickListener { showStudentPickerRegistrationDialog() }
         binding.btnVerifyFaceB.setOnClickListener { toggleAutoVerification() }
         binding.btnClearFacesB.setOnClickListener { clearRegisteredFaceDatabase() }
+
+        binding.btnOpenAdminDashboardFromCamera.setOnClickListener {
+            val adminAccount = AccountRepository.findAccountById("ADMIN_01")
+            if (adminAccount != null) {
+                KioskSessionManager.startSession(adminAccount)
+            }
+            (activity as? MainActivity)?.navigateToFragment(AdminDashboardFragment(), addToBackStack = true)
+        }
 
         // Bottom Bar
         binding.btnRefreshUsb.setOnClickListener {
@@ -274,7 +311,7 @@ class KioskCameraFragment : Fragment() {
         }
     }
 
-    private fun setVerificationState(state: VerificationState, student: Student? = null) {
+    private fun setVerificationState(state: VerificationState, account: UserAccount? = null) {
         if (_binding == null) return
         currentVerificationState = state
         val ctx = context ?: return
@@ -310,20 +347,28 @@ class KioskCameraFragment : Fragment() {
                 binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
                 binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_red))
                 binding.tvStatusTitle.text = "Đang xác minh danh tính..."
-                binding.tvStatusMessage.text = "Đang đối soát dữ liệu với CSDL sinh viên..."
+                binding.tvStatusMessage.text = "Đang đối soát dữ liệu với hệ thống tài khoản & phân quyền..."
                 binding.btnRetryVerification.visibility = View.GONE
                 binding.layoutSuccessBanner.visibility = View.GONE
             }
             VerificationState.SUCCESS -> {
                 binding.ivStatusIcon.setImageResource(R.drawable.ic_check_circle)
                 binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_success))
-                binding.tvStatusTitle.text = "Xác thực thành công!"
-                binding.tvStatusMessage.text = if (student != null) "Xin chào: ${student.fullName} (${student.studentId})" else "Nhận diện sinh viên thành công"
+                binding.tvStatusTitle.text = when (account?.role) {
+                    UserRole.ADMIN -> "Đăng nhập Quản trị viên"
+                    UserRole.TECHNICIAN -> "Đăng nhập Kỹ thuật viên"
+                    else -> "Xác thực thành công!"
+                }
+                binding.tvStatusMessage.text = if (account != null) "Xin chào: ${account.displayName} (${account.accountId})" else "Xác thực thành công"
                 binding.btnRetryVerification.visibility = View.GONE
 
-                if (student != null) {
-                    binding.tvSuccessStudentName.text = "Xin chào: ${student.fullName}"
-                    binding.tvSuccessStudentId.text = "MSSV: ${student.studentId} • Lớp: ${student.className}"
+                if (account != null) {
+                    binding.tvSuccessStudentName.text = "Xin chào: ${account.displayName}"
+                    binding.tvSuccessStudentId.text = when (account.role) {
+                        UserRole.STUDENT -> "MSSV: ${account.accountId} • Lớp: ${account.studentDetails?.className ?: "N/A"}"
+                        UserRole.ADMIN -> "Mã: ${account.accountId} • [ADMIN DASHBOARD]"
+                        UserRole.TECHNICIAN -> "Mã: ${account.accountId} • [BẢNG CHẨN ĐOÁN KỸ THUẬT]"
+                    }
                 }
                 binding.layoutSuccessBanner.visibility = View.VISIBLE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_success))
@@ -332,7 +377,16 @@ class KioskCameraFragment : Fragment() {
                 binding.ivStatusIcon.setImageResource(R.drawable.ic_alert)
                 binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_warning))
                 binding.tvStatusTitle.text = "Không xác minh được"
-                binding.tvStatusMessage.text = "Không tìm thấy thông tin sinh viên phù hợp trong CSDL"
+                binding.tvStatusMessage.text = "Không tìm thấy thông tin tài khoản phù hợp trong CSDL"
+                binding.btnRetryVerification.visibility = View.VISIBLE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
+            }
+            VerificationState.ACCOUNT_DISABLED -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_alert)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_error))
+                binding.tvStatusTitle.text = "Tài khoản bị vô hiệu hóa"
+                binding.tvStatusMessage.text = if (account != null) "Tài khoản '${account.displayName}' (${account.accountId}) đã bị khóa" else "Tài khoản bị vô hiệu hóa"
                 binding.btnRetryVerification.visibility = View.VISIBLE
                 binding.layoutSuccessBanner.visibility = View.GONE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
@@ -708,13 +762,13 @@ class KioskCameraFragment : Fragment() {
         val tvClass = dialogView.findViewById<TextView>(R.id.tvSelectedStudentClass)
         val tvEmail = dialogView.findViewById<TextView>(R.id.tvSelectedStudentEmail)
 
-        var selectedStudent: Student? = null
+        var selectedAccount: UserAccount? = null
 
-        fun renderStudentList(students: List<Student>) {
+        fun renderAccountList(accounts: List<UserAccount>) {
             containerList.removeAllViews()
-            if (students.isEmpty()) {
+            if (accounts.isEmpty()) {
                 val emptyTv = TextView(ctx).apply {
-                    text = "Không tìm thấy sinh viên nào khớp từ khóa"
+                    text = "Không tìm thấy tài khoản nào khớp từ khóa"
                     setTextColor(0xFFAAAAAA.toInt())
                     setPadding(16, 16, 16, 16)
                     textSize = 12f
@@ -723,24 +777,24 @@ class KioskCameraFragment : Fragment() {
                 return
             }
 
-            for (st in students) {
-                val registeredFace = UserFaceRepository.findUserByStudentId(st.studentId)
+            for (acc in accounts) {
+                val registeredFace = UserFaceRepository.findUserByStudentId(acc.accountId)
                 val isReg = registeredFace != null
 
                 val itemView = LinearLayout(ctx).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(16, 12, 16, 12)
-                    setBackgroundColor(if (selectedStudent?.studentId == st.studentId) 0xFF333333.toInt() else Color.TRANSPARENT)
+                    setBackgroundColor(if (selectedAccount?.accountId == acc.accountId) 0xFF333333.toInt() else Color.TRANSPARENT)
 
                     val titleTv = TextView(ctx).apply {
-                        text = "MSSV: ${st.studentId} - ${st.fullName} ${if (isReg) "✅ (Đã đăng ký)" else ""}"
+                        text = "${acc.getRoleBadgeText()} ${acc.accountId} - ${acc.displayName} ${if (isReg) "✅ (Đã có khuôn mặt)" else ""}"
                         setTextColor(if (isReg) 0xFF00E676.toInt() else Color.WHITE)
                         textSize = 12f
                         paint.isFakeBoldText = true
                     }
 
                     val subTv = TextView(ctx).apply {
-                        text = "Lớp: ${st.className} | Khoa: ${st.faculty}"
+                        text = if (acc.isStudent()) "Lớp: ${acc.studentDetails?.className} | Khoa: ${acc.studentDetails?.faculty}" else "Vai trò: ${acc.role.displayName} • Trạng thái: ${acc.status.description}"
                         setTextColor(0xFFBBBBBB.toInt())
                         textSize = 11f
                     }
@@ -749,27 +803,27 @@ class KioskCameraFragment : Fragment() {
                     addView(subTv)
 
                     setOnClickListener {
-                        selectedStudent = st
-                        renderStudentList(students)
+                        selectedAccount = acc
+                        renderAccountList(accounts)
 
                         cardDetails.visibility = View.VISIBLE
-                        tvId.text = "Mã SV: ${st.studentId} ${if (isReg) "(Đã có dữ liệu khuôn mặt)" else ""}"
-                        tvName.text = "Họ tên: ${st.fullName}"
-                        tvClass.text = "Lớp: ${st.className} | Khoa: ${st.faculty}"
-                        tvEmail.text = "Email: ${st.email}"
+                        tvId.text = "Mã TK: ${acc.accountId} [${acc.getRoleBadgeText()}] ${if (isReg) "(Đã nạp khuôn mặt)" else ""}"
+                        tvName.text = "Tên: ${acc.displayName}"
+                        tvClass.text = if (acc.isStudent()) "Lớp: ${acc.studentDetails?.className} | Khoa: ${acc.studentDetails?.faculty}" else "Vai trò: ${acc.role.displayName} • Trạng thái: ${acc.status.description}"
+                        tvEmail.text = "Email: ${acc.email ?: "N/A"}"
                     }
                 }
                 containerList.addView(itemView)
             }
         }
 
-        renderStudentList(StudentRepository.getAllStudents())
+        renderAccountList(AccountRepository.getAllAccounts())
 
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 val query = s?.toString() ?: ""
-                renderStudentList(StudentRepository.searchStudents(query))
+                renderAccountList(AccountRepository.searchAccounts(query))
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -777,20 +831,20 @@ class KioskCameraFragment : Fragment() {
         AlertDialog.Builder(ctx)
             .setView(dialogView)
             .setPositiveButton("Xác nhận Đăng ký") { _, _ ->
-                val st = selectedStudent
-                if (st != null) {
-                    checkAndProcessStudentRegistration(ctx, st, nv21, latestFrameWidth, latestFrameHeight, box)
+                val acc = selectedAccount
+                if (acc != null) {
+                    checkAndProcessAccountRegistration(ctx, acc, nv21, latestFrameWidth, latestFrameHeight, box)
                 } else {
-                    Toast.makeText(ctx, "Vui lòng chọn một sinh viên từ danh sách!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Vui lòng chọn một tài khoản từ danh sách!", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Hủy", null)
             .show()
     }
 
-    private fun checkAndProcessStudentRegistration(
+    private fun checkAndProcessAccountRegistration(
         ctx: Context,
-        student: Student,
+        account: UserAccount,
         nv21: ByteArray,
         width: Int,
         height: Int,
@@ -811,17 +865,17 @@ class KioskCameraFragment : Fragment() {
         val embedding = model.extractEmbedding(croppedFace)
         croppedFace.recycle()
 
-        // 1. Check duplicate Student ID
-        val existingStudentFace = UserFaceRepository.findUserByStudentId(student.studentId)
-        if (existingStudentFace != null) {
+        // 1. Check duplicate Student ID / Account ID
+        val existingFace = UserFaceRepository.findUserByStudentId(account.accountId)
+        if (existingFace != null) {
             AlertDialog.Builder(ctx)
-                .setTitle("⚠️ Sinh Viên Đã Đăng Ký Khuôn Mặt")
-                .setMessage("Sinh viên ${student.fullName} (MSSV: ${student.studentId}) đã đăng ký khuôn mặt trước đó!\nBạn có muốn CẬP NHẬT LẠI khuôn mặt mới không?")
+                .setTitle("⚠️ Tài Khoản Đã Đăng Ký Khuôn Mặt")
+                .setMessage("Tài khoản ${account.displayName} (${account.accountId}) đã có dữ liệu khuôn mặt!\nBạn có muốn CẬP NHẬT LẠI khuôn mặt mới không?")
                 .setPositiveButton("Cập nhật mới") { _, _ ->
-                    val updatedUser = UserFaceModel(student.studentId, student.fullName, embedding)
+                    val updatedUser = UserFaceModel(account.accountId, account.displayName, embedding)
                     UserFaceRepository.updateStudentFace(ctx, updatedUser)
-                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho sinh viên: ${student.fullName} (${student.studentId})")
-                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${student.fullName}!", Toast.LENGTH_SHORT).show()
+                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho: ${account.displayName} (${account.accountId})")
+                    Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${account.displayName}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
                 .setNegativeButton("Hủy", null)
@@ -833,23 +887,23 @@ class KioskCameraFragment : Fragment() {
         val duplicateFaceMatch = UserFaceRepository.checkDuplicateFace(embedding, duplicateThreshold = 0.72f)
         if (duplicateFaceMatch != null) {
             val (dupUser, similarity) = duplicateFaceMatch
-            val dupStudent = StudentRepository.findStudentById(dupUser.studentId)
-            val dupName = dupStudent?.fullName ?: dupUser.name
+            val dupAccount = AccountRepository.findAccountById(dupUser.studentId)
+            val dupName = dupAccount?.displayName ?: dupUser.name
             val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
 
             AlertDialog.Builder(ctx)
                 .setTitle("🚨 Cảnh Báo Trùng Khuôn Mặt")
-                .setMessage("Khuôn mặt này trùng khớp $percentStr với sinh viên '$dupName' (MSSV: ${dupUser.studentId}) đã đăng ký!\nBạn muốn xử lý thế nào?")
+                .setMessage("Khuôn mặt này trùng khớp $percentStr với '${dupName}' (${dupUser.studentId}) đã đăng ký!\nBạn muốn xử lý thế nào?")
                 .setPositiveButton("Cập nhật cho '$dupName'") { _, _ ->
                     val updatedUser = UserFaceModel(dupUser.studentId, dupName, embedding)
                     UserFaceRepository.updateStudentFace(ctx, updatedUser)
-                    appendLog("🔄 Đã cập nhật khuôn mặt cho sinh viên cũ: $dupName (${dupUser.studentId})")
+                    appendLog("🔄 Đã cập nhật khuôn mặt cho tài khoản cũ: $dupName (${dupUser.studentId})")
                     Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho $dupName!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
-                .setNeutralButton("Vẫn liên kết cho '${student.fullName}'") { _, _ ->
-                    val registeredUser = UserFaceRepository.registerStudentFace(ctx, student.studentId, student.fullName, embedding)
-                    appendLog("✅ Đã liên kết khuôn mặt cho sinh viên mới: ${registeredUser.name} (${registeredUser.studentId})")
+                .setNeutralButton("Vẫn liên kết cho '${account.displayName}'") { _, _ ->
+                    val registeredUser = UserFaceRepository.registerStudentFace(ctx, account.accountId, account.displayName, embedding)
+                    appendLog("✅ Đã liên kết khuôn mặt cho: ${registeredUser.name} (${registeredUser.studentId})")
                     Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
@@ -859,8 +913,8 @@ class KioskCameraFragment : Fragment() {
         }
 
         // 3. Normal registration
-        val registeredUser = UserFaceRepository.registerStudentFace(ctx, student.studentId, student.fullName, embedding)
-        appendLog("✅ Đã đăng ký khuôn mặt thành công: ${registeredUser.name} (${registeredUser.studentId})")
+        val registeredUser = UserFaceRepository.registerStudentFace(ctx, account.accountId, account.displayName, embedding)
+        appendLog("✅ Đã đăng ký khuôn mặt thành công: ${registeredUser.name} (${registeredUser.studentId}) [${account.role.displayName}]")
         Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
         updateRecognitionStatusUI()
     }
@@ -946,47 +1000,78 @@ class KioskCameraFragment : Fragment() {
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
                 val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
-                appendLog("✅ [FR] Kết quả MATCH: MSSV=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
+                appendLog("✅ [FR] Kết quả MATCH: ID=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
 
-                val student = StudentRepository.findStudentById(matchedUser.studentId)
+                // Tra cứu tài khoản theo định danh ID
+                val account = AccountRepository.findAccountById(matchedUser.studentId)
 
-                if (student != null) {
-                    // Lock verification callback to prevent duplicate sessions
-                    isNavigatingToProfile = true
-                    isAutoVerificationEnabled = false
-
-                    val resultText = "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${student.studentId} | Họ tên: ${student.fullName}\nLớp: ${student.className} | Khoa: ${student.faculty} | Tương đồng: $percentStr"
-                    binding.tvRecognitionResultB.text = resultText
-                    binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
-
-                    // Show success status card & overlay banner
-                    setVerificationState(VerificationState.SUCCESS, student)
-
-                    // Start kiosk session with 90s inactivity timeout
-                    KioskSessionManager.startSession(student)
-                    appendLog("✅ [FR] Xác thực thành công: ${student.fullName} (${student.studentId}) - Chuyển sang Trang cá nhân sau 1.0 giây.")
-
-                    // Hold for exactly 1000ms (0.8s - 1.2s requirement)
-                    mainHandler.postDelayed({
-                        activity?.runOnUiThread {
-                            if (_binding != null && isAdded) {
-                                try {
-                                    (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
-                                } catch (e: Exception) {
-                                    appendLog("❌ [FR] Lỗi chuyển hướng trang: ${e.message}")
-                                    isNavigatingToProfile = false
-                                    setVerificationState(VerificationState.IDLE)
-                                }
-                            }
-                        }
-                    }, 1000)
-                } else {
-                    appendLog("⚠️ [FR] NO MATCH: Mẫu khuôn mặt khớp ID ${matchedUser.studentId} nhưng không có dữ liệu trong StudentRepository")
-                    val resultText = "⚠️ Không tìm thấy hồ sơ sinh viên MSSV: ${matchedUser.studentId}"
+                if (account == null) {
+                    appendLog("⚠️ [RBAC] NO MATCH: Mẫu khuôn mặt khớp ID ${matchedUser.studentId} nhưng không tồn tại tài khoản tương ứng trong AccountRepository")
+                    val resultText = "⚠️ Không tìm thấy tài khoản tương ứng trong hệ thống (ID: ${matchedUser.studentId})"
                     binding.tvRecognitionResultB.text = resultText
                     binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
                     setVerificationState(VerificationState.UNRECOGNIZED)
+                    return
                 }
+
+                // Kiểm tra trạng thái tài khoản
+                if (!account.isActive()) {
+                    appendLog("⛔ [RBAC] TỪ CHỐI TRUY CẬP: Tài khoản ${account.displayName} (${account.accountId}) đang ở trạng thái ${account.status.description}")
+                    val resultText = "⛔ TÀI KHOẢN BỊ VÔ HIỆU HÓA!\n${account.displayName} (${account.accountId})\nVui lòng liên hệ ban quản trị Kiosk để được hỗ trợ."
+                    binding.tvRecognitionResultB.text = resultText
+                    binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
+                    setVerificationState(VerificationState.ACCOUNT_DISABLED, account)
+                    return
+                }
+
+                // Khóa callback để ngăn chặn duplicate session
+                isNavigatingToProfile = true
+                isAutoVerificationEnabled = false
+
+                val resultText = when (account.role) {
+                    UserRole.STUDENT -> {
+                        val st = account.studentDetails
+                        "✅ XÁC THỰC THÀNH CÔNG!\nMSSV: ${account.accountId} | Họ tên: ${account.displayName}\nLớp: ${st?.className ?: "N/A"} | Khoa: ${st?.faculty ?: "N/A"} | Tương đồng: $percentStr"
+                    }
+                    UserRole.ADMIN -> {
+                        "🛡️ XÁC THỰC QUẢN TRỊ VIÊN!\n[ADMIN] ${account.displayName} (Mã: ${account.accountId})\nQuyền: Quản trị Kiosk toàn diện | Tương đồng: $percentStr"
+                    }
+                    UserRole.TECHNICIAN -> {
+                        "⚙️ XÁC THỰC KỸ THUẬT VIÊN!\n[TECHNICIAN] ${account.displayName} (Mã: ${account.accountId})\nQuyền: Chẩn đoán camera & Thiết bị | Tương đồng: $percentStr"
+                    }
+                }
+
+                binding.tvRecognitionResultB.text = resultText
+                binding.tvRecognitionResultB.setTextColor(0xFF00E676.toInt())
+
+                // Show success status card & overlay banner
+                setVerificationState(VerificationState.SUCCESS, account)
+
+                // Start kiosk session with 90s inactivity timeout
+                KioskSessionManager.startSession(account)
+                appendLog("✅ [RBAC] Xác thực thành công: ${account.displayName} (${account.accountId}) [${account.role.displayName}] - Chuyển sang màn hình ${if (account.isStudent()) "Trang cá nhân SV" else "Admin Dashboard"} sau 1.0 giây.")
+
+                // Hold for exactly 1000ms (0.8s - 1.2s requirement)
+                mainHandler.postDelayed({
+                    activity?.runOnUiThread {
+                        if (_binding != null && isAdded) {
+                            try {
+                                when (account.role) {
+                                    UserRole.STUDENT -> {
+                                        (activity as? MainActivity)?.navigateToFragment(StudentProfileFragment(), addToBackStack = false)
+                                    }
+                                    UserRole.ADMIN, UserRole.TECHNICIAN -> {
+                                        (activity as? MainActivity)?.navigateToFragment(AdminDashboardFragment(), addToBackStack = false)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                appendLog("❌ [FR] Lỗi chuyển hướng trang: ${e.message}")
+                                isNavigatingToProfile = false
+                                setVerificationState(VerificationState.IDLE)
+                            }
+                        }
+                    }
+                }, 1000)
             } else {
                 appendLog("❌ [FR] Kết quả NO MATCH: Không có sinh viên nào trong DB đạt ngưỡng ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
                 binding.tvRecognitionResultB.text = "❌ Không tìm thấy thông tin sinh viên phù hợp trong DB"
