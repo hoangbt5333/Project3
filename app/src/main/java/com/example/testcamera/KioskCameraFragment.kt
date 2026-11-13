@@ -60,6 +60,7 @@ class KioskCameraFragment : Fragment() {
         private const val STREAK_TIMEOUT_MS = 1200L
         private const val MIN_FACE_PIXEL_SIZE = 90
         private const val MAX_HEAD_POSE_DEGREE = 18f
+        private const val REQUIRED_ENROLLMENT_SAMPLES = 3
 
         fun newInstance(openInTechMode: Boolean = false): KioskCameraFragment {
             val fragment = KioskCameraFragment()
@@ -118,6 +119,10 @@ class KioskCameraFragment : Fragment() {
     private var currentStreakCount = 0
     private var currentStreakSimilaritySum = 0f
     private var lastStreakTimestamp = 0L
+
+    // Multi-Sample Enrollment (Phase 5)
+    private var pendingRegistrationAccount: UserAccount? = null
+    private val enrollmentSamples = mutableListOf<FloatArray>()
 
     private fun resetVerificationStreak() {
         currentStreakStudentId = null
@@ -791,6 +796,36 @@ class KioskCameraFragment : Fragment() {
                                 } else {
                                     binding.tvFaceStatusB.text = "👤 ML Kit: Khung hình đạt chuẩn | Detect FPS: $faceDetectFps"
 
+                                    // Multi-Sample Enrollment Handler (Phase 5)
+                                    val enrollAcc = pendingRegistrationAccount
+                                    if (enrollAcc != null) {
+                                        val model = faceNetModel
+                                        if (model != null && model.isModelReady()) {
+                                            val cropped = NV21ToBitmapConverter.cropFaceBitmap(frameBytes, width, height, box)
+                                            if (cropped != null) {
+                                                val emb = model.extractEmbedding(cropped)
+                                                cropped.recycle()
+                                                if (emb.size == FaceNetModel.EMBEDDING_SIZE && !emb.any { it.isNaN() } && emb.any { it != 0f }) {
+                                                    enrollmentSamples.add(emb)
+                                                    val count = enrollmentSamples.size
+                                                    appendLog("📸 [ĐĂNG KÝ] Đã chụp mẫu $count/$REQUIRED_ENROLLMENT_SAMPLES cho ${enrollAcc.displayName}")
+                                                    binding.tvFaceStatusB.text = "📸 Đang quét mẫu: $count/$REQUIRED_ENROLLMENT_SAMPLES..."
+
+                                                    if (count >= REQUIRED_ENROLLMENT_SAMPLES) {
+                                                        val finalEmbedding = UserFaceRepository.computeNormalizedAverageEmbedding(enrollmentSamples)
+                                                        pendingRegistrationAccount = null
+                                                        enrollmentSamples.clear()
+                                                        val currentCtx = context
+                                                        if (currentCtx != null) {
+                                                            completeAccountRegistration(currentCtx, enrollAcc, finalEmbedding)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        return@runOnUiThread
+                                    }
+
                                     if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile && currentVerificationState != VerificationState.VERIFYING) {
                                         setVerificationState(VerificationState.DETECTING)
                                     }
@@ -910,7 +945,7 @@ class KioskCameraFragment : Fragment() {
             .setPositiveButton("Xác nhận Đăng ký") { _, _ ->
                 val acc = selectedAccount
                 if (acc != null) {
-                    checkAndProcessAccountRegistration(ctx, acc, nv21, latestFrameWidth, latestFrameHeight, box)
+                    startMultiSampleEnrollment(ctx, acc)
                 } else {
                     Toast.makeText(ctx, "Vui lòng chọn một tài khoản từ danh sách!", Toast.LENGTH_SHORT).show()
                 }
@@ -919,14 +954,7 @@ class KioskCameraFragment : Fragment() {
             .show()
     }
 
-    private fun checkAndProcessAccountRegistration(
-        ctx: Context,
-        account: UserAccount,
-        nv21: ByteArray,
-        width: Int,
-        height: Int,
-        box: Rect
-    ) {
+    private fun startMultiSampleEnrollment(ctx: Context, account: UserAccount) {
         val model = faceNetModel
         if (model == null || !model.isModelReady()) {
             Toast.makeText(ctx, "Model Face Recognition chưa sẵn sàng hoặc lỗi TFLite!", Toast.LENGTH_SHORT).show()
@@ -934,15 +962,36 @@ class KioskCameraFragment : Fragment() {
             return
         }
 
-        val croppedFace = NV21ToBitmapConverter.cropFaceBitmap(nv21, width, height, box)
-        if (croppedFace == null) {
-            Toast.makeText(ctx, "Lỗi trích xuất vùng ảnh khuôn mặt!", Toast.LENGTH_SHORT).show()
-            return
-        }
+        pendingRegistrationAccount = account
+        enrollmentSamples.clear()
+        appendLog("📸 [ĐĂNG KÝ] Bắt đầu quét $REQUIRED_ENROLLMENT_SAMPLES mẫu khuôn mặt chuẩn cho: ${account.displayName} (${account.accountId}). Vui lòng nhìn thẳng camera...")
+        Toast.makeText(ctx, "Vui lòng nhìn thẳng camera để quét $REQUIRED_ENROLLMENT_SAMPLES mẫu...", Toast.LENGTH_SHORT).show()
 
-        val embedding = model.extractEmbedding(croppedFace)
-        croppedFace.recycle()
+        // 6s timeout safety handler
+        mainHandler.postDelayed({
+            if (pendingRegistrationAccount?.accountId == account.accountId) {
+                if (enrollmentSamples.isNotEmpty()) {
+                    val finalEmbedding = UserFaceRepository.computeNormalizedAverageEmbedding(enrollmentSamples)
+                    val targetAcc = pendingRegistrationAccount!!
+                    pendingRegistrationAccount = null
+                    enrollmentSamples.clear()
+                    appendLog("⚠️ [ĐĂNG KÝ] Hết thời gian chờ: Tự động hoàn tất với ${enrollmentSamples.size} mẫu đã thu thập.")
+                    completeAccountRegistration(ctx, targetAcc, finalEmbedding)
+                } else {
+                    pendingRegistrationAccount = null
+                    enrollmentSamples.clear()
+                    appendLog("❌ [ĐĂNG KÝ] Hết thời gian: Không thu nhận được mẫu khuôn mặt đạt chuẩn.")
+                    Toast.makeText(ctx, "Hủy đăng ký: Khuôn mặt chưa đạt chuẩn", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }, 6000L)
+    }
 
+    private fun completeAccountRegistration(
+        ctx: Context,
+        account: UserAccount,
+        embedding: FloatArray
+    ) {
         // 1. Check duplicate Student ID / Account ID
         val existingFace = UserFaceRepository.findUserByStudentId(account.accountId)
         if (existingFace != null) {
@@ -952,7 +1001,7 @@ class KioskCameraFragment : Fragment() {
                 .setPositiveButton("Cập nhật mới") { _, _ ->
                     val updatedUser = UserFaceModel(account.accountId, account.displayName, embedding)
                     UserFaceRepository.updateStudentFace(ctx, updatedUser)
-                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt cho: ${account.displayName} (${account.accountId})")
+                    appendLog("🔄 Đã cập nhật lại mẫu khuôn mặt (Trung bình 3 khung hình) cho: ${account.displayName} (${account.accountId})")
                     Toast.makeText(ctx, "✅ Đã cập nhật khuôn mặt cho ${account.displayName}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
@@ -981,7 +1030,7 @@ class KioskCameraFragment : Fragment() {
                 }
                 .setNeutralButton("Vẫn liên kết cho '${account.displayName}'") { _, _ ->
                     val registeredUser = UserFaceRepository.registerStudentFace(ctx, account.accountId, account.displayName, embedding)
-                    appendLog("✅ Đã liên kết khuôn mặt cho: ${registeredUser.name} (${registeredUser.studentId})")
+                    appendLog("✅ Đã liên kết khuôn mặt (Trung bình 3 khung hình) cho: ${registeredUser.name} (${registeredUser.studentId})")
                     Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
                     updateRecognitionStatusUI()
                 }
@@ -992,7 +1041,7 @@ class KioskCameraFragment : Fragment() {
 
         // 3. Normal registration
         val registeredUser = UserFaceRepository.registerStudentFace(ctx, account.accountId, account.displayName, embedding)
-        appendLog("✅ Đã đăng ký khuôn mặt thành công: ${registeredUser.name} (${registeredUser.studentId}) [${account.role.displayName}]")
+        appendLog("✅ Đã đăng ký khuôn mặt thành công (Mẫu trung bình 3 khung hình): ${registeredUser.name} (${registeredUser.studentId}) [${account.role.displayName}]")
         Toast.makeText(ctx, "✅ Đã đăng ký khuôn mặt cho ${registeredUser.name}!", Toast.LENGTH_SHORT).show()
         updateRecognitionStatusUI()
     }

@@ -297,4 +297,31 @@ object UserFaceRepository {
         if (denom == 0.0 || denom.isNaN()) return 0f
         return (dotProduct / denom).toFloat().coerceIn(-1.0f, 1.0f)
     }
+
+    fun computeNormalizedAverageEmbedding(embeddings: List<FloatArray>): FloatArray {
+        require(embeddings.isNotEmpty()) { "Embedding list must not be empty" }
+        val dim = embeddings[0].size
+        val avg = FloatArray(dim)
+
+        for (emb in embeddings) {
+            require(emb.size == dim) { "All embeddings must have the same dimension ($dim)" }
+            for (i in 0 until dim) {
+                avg[i] += emb[i]
+            }
+        }
+
+        var sumSq = 0f
+        for (i in 0 until dim) {
+            avg[i] /= embeddings.size
+            sumSq += avg[i] * avg[i]
+        }
+
+        val norm = sqrt(sumSq.toDouble()).toFloat()
+        if (norm > 0f && !norm.isNaN()) {
+            for (i in 0 until dim) {
+                avg[i] /= norm
+            }
+        }
+        return avg
+    }
 }

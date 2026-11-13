@@ -178,4 +178,37 @@ class FaceRecognitionPipelineTest {
 
         UserFaceRepository.clearUsersForTesting()
     }
+
+    @Test
+    fun testMultiSampleEnrollmentAveraging() {
+        val baseEmb = generateSimulatedFaceEmbedding(5555L)
+
+        // Generate 3 sample vectors with small perturbation representing 3 video frames of the same student
+        val rand = Random(42)
+        val sample1 = FloatArray(192) { i -> baseEmb[i] + (rand.nextFloat() - 0.5f) * 0.03f }
+        val sample2 = FloatArray(192) { i -> baseEmb[i] + (rand.nextFloat() - 0.5f) * 0.03f }
+        val sample3 = FloatArray(192) { i -> baseEmb[i] + (rand.nextFloat() - 0.5f) * 0.03f }
+        l2Normalize(sample1)
+        l2Normalize(sample2)
+        l2Normalize(sample3)
+
+        val averaged = UserFaceRepository.computeNormalizedAverageEmbedding(listOf(sample1, sample2, sample3))
+
+        assertEquals(192, averaged.size)
+
+        // Check L2 norm is strictly 1.0
+        var normSq = 0f
+        for (v in averaged) normSq += v * v
+        val norm = Math.sqrt(normSq.toDouble()).toFloat()
+        assertEquals(1.0f, norm, 1e-4f)
+
+        // Averaged vector should be highly correlated with all 3 frames (> 0.98)
+        val sim1 = UserFaceRepository.calculateCosineSimilarity(averaged, sample1)
+        val sim2 = UserFaceRepository.calculateCosineSimilarity(averaged, sample2)
+        val sim3 = UserFaceRepository.calculateCosineSimilarity(averaged, sample3)
+
+        assertTrue("Averaged vector must correlate > 0.98 with sample 1: $sim1", sim1 > 0.98f)
+        assertTrue("Averaged vector must correlate > 0.98 with sample 2: $sim2", sim2 > 0.98f)
+        assertTrue("Averaged vector must correlate > 0.98 with sample 3: $sim3", sim3 > 0.98f)
+    }
 }
