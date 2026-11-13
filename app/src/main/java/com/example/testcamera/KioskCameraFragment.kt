@@ -1124,6 +1124,11 @@ class KioskCameraFragment : Fragment() {
 
             val matchResult = UserFaceRepository.findBestMatch(liveEmbedding, threshold = threshold)
 
+            val diagLog = "[FR_DIAG] bbox=${box.width()}x${box.height()} | top1=${matchResult?.user?.studentId ?: "NONE"} | sim=${String.format(Locale.getDefault(), "%.3f", matchResult?.similarity ?: 0f)} | margin=${String.format(Locale.getDefault(), "%.3f", matchResult?.margin ?: 0f)}"
+            try {
+                android.util.Log.d("FR_DIAGNOSTIC", diagLog)
+            } catch (_: Exception) {}
+
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
                 val now = System.currentTimeMillis()
@@ -1145,7 +1150,7 @@ class KioskCameraFragment : Fragment() {
 
                 // Temporal Multi-Frame Confirmation (Require 3 consecutive matching frames)
                 if (currentStreakCount < REQUIRED_CONSECUTIVE_MATCHES) {
-                    appendLog("⏳ [FR] Tiến trình xác thực: $currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES khung hình cho ${matchedUser.name} ($percentStr | Margin=$marginStr)")
+                    appendLog("⏳ [FR] Tiến trình: $currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES khung hình cho ${matchedUser.name} ($percentStr | Margin=$marginStr)")
                     binding.tvRecognitionResultB.text = "⏳ Đang xác nhận: $currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES khung hình ($percentStr)..."
                     binding.tvRecognitionResultB.setTextColor(0xFF29B6F6.toInt())
                     setVerificationState(VerificationState.VERIFYING)
@@ -1154,6 +1159,7 @@ class KioskCameraFragment : Fragment() {
 
                 // Completed required streak!
                 appendLog("✅ [FR] Xác thực thành công sau $currentStreakCount khung hình liên tiếp! ID=${matchedUser.studentId}, Tương đồng TB=$percentStr | Margin=$marginStr")
+                appendLog("📊 $diagLog | streak=$currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES | DECISION=ACCEPTED")
                 resetVerificationStreak()
 
                 // Tra cứu tài khoản theo định danh ID
