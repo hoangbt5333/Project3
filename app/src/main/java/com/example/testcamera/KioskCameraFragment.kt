@@ -56,6 +56,10 @@ class KioskCameraFragment : Fragment() {
 
     companion object {
         private const val ARG_OPEN_IN_TECH_MODE = "arg_open_in_tech_mode"
+        private const val REQUIRED_CONSECUTIVE_MATCHES = 3
+        private const val STREAK_TIMEOUT_MS = 1200L
+        private const val MIN_FACE_PIXEL_SIZE = 90
+        private const val MAX_HEAD_POSE_DEGREE = 18f
 
         fun newInstance(openInTechMode: Boolean = false): KioskCameraFragment {
             val fragment = KioskCameraFragment()
@@ -108,6 +112,19 @@ class KioskCameraFragment : Fragment() {
     private var latestFrameHeight = 480
     private var isAutoVerificationEnabled = true
     private var isNavigatingToProfile = false
+
+    // Temporal Multi-Frame Verification (Phase 4)
+    private var currentStreakStudentId: String? = null
+    private var currentStreakCount = 0
+    private var currentStreakSimilaritySum = 0f
+    private var lastStreakTimestamp = 0L
+
+    private fun resetVerificationStreak() {
+        currentStreakStudentId = null
+        currentStreakCount = 0
+        currentStreakSimilaritySum = 0f
+        lastStreakTimestamp = 0L
+    }
 
     private var currentVerificationState = VerificationState.CAMERA_CONNECTING
     private var isTechModeVisible = false
@@ -260,6 +277,7 @@ class KioskCameraFragment : Fragment() {
         }
 
         binding.btnRetryVerification.setOnClickListener {
+            resetVerificationStreak()
             setVerificationState(VerificationState.IDLE)
             isAutoVerificationEnabled = true
         }
@@ -717,6 +735,7 @@ class KioskCameraFragment : Fragment() {
                             if (faces.isEmpty()) {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
+                                resetVerificationStreak()
                                 binding.faceOverlayB.clear()
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
 
@@ -724,22 +743,62 @@ class KioskCameraFragment : Fragment() {
                                     setVerificationState(VerificationState.IDLE)
                                 }
                             } else {
-                                val face = faces[0]
-                                latestDetectedBox = face.boundingBox
+                                // Select primary face (largest area and closest to screen center)
+                                val face = if (faces.size > 1) {
+                                    faces.maxByOrNull { f ->
+                                        val b = f.boundingBox
+                                        val area = b.width().coerceAtLeast(1) * b.height().coerceAtLeast(1)
+                                        val cx = b.exactCenterX()
+                                        val cy = b.exactCenterY()
+                                        val dx = cx - width / 2f
+                                        val dy = cy - height / 2f
+                                        val distSq = dx * dx + dy * dy
+                                        area / (1.0f + distSq * 0.001f)
+                                    } ?: faces[0]
+                                } else {
+                                    faces[0]
+                                }
+
+                                val box = face.boundingBox
+                                latestDetectedBox = box
                                 latestNv21Bytes = frameBytes
                                 latestFrameWidth = width
                                 latestFrameHeight = height
 
-                                binding.faceOverlayB.setFaces(faces, width, height)
-                                binding.tvFaceStatusB.text = "👤 ML Kit: Phát hiện ${faces.size} khuôn mặt | Detect FPS: $faceDetectFps"
+                                binding.faceOverlayB.setFaces(listOf(face), width, height)
 
-                                if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile) {
-                                    setVerificationState(VerificationState.DETECTING)
-                                }
+                                // Quality checks: face size, head pose angles, and boundary clipping
+                                val isSizeOk = box.width() >= MIN_FACE_PIXEL_SIZE && box.height() >= MIN_FACE_PIXEL_SIZE
+                                val yaw = face.headEulerAngleY
+                                val pitch = face.headEulerAngleX
+                                val roll = face.headEulerAngleZ
+                                val isPoseOk = Math.abs(yaw) <= MAX_HEAD_POSE_DEGREE &&
+                                        Math.abs(pitch) <= MAX_HEAD_POSE_DEGREE &&
+                                        Math.abs(roll) <= MAX_HEAD_POSE_DEGREE
+                                val isNotClipped = box.left >= 4 && box.top >= 4 && box.right <= width - 4 && box.bottom <= height - 4
 
-                                val ctx = context
-                                if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile && currentVerificationState != VerificationState.UNRECOGNIZED) {
-                                    performFaceVerification(frameBytes, width, height, face.boundingBox)
+                                val isQualityOk = isSizeOk && isPoseOk && isNotClipped
+
+                                if (!isQualityOk) {
+                                    resetVerificationStreak()
+                                    if (!isSizeOk) {
+                                        binding.tvFaceStatusB.text = "👤 Vui lòng lại gần camera hơn (Mặt: ${box.width()}px < ${MIN_FACE_PIXEL_SIZE}px)"
+                                    } else if (!isPoseOk) {
+                                        binding.tvFaceStatusB.text = "👤 Vui lòng nhìn thẳng camera (Yaw:${yaw.toInt()}°, Pitch:${pitch.toInt()}°)"
+                                    } else {
+                                        binding.tvFaceStatusB.text = "👤 Vui lòng đưa khuôn mặt vào giữa khung hình"
+                                    }
+                                } else {
+                                    binding.tvFaceStatusB.text = "👤 ML Kit: Khung hình đạt chuẩn | Detect FPS: $faceDetectFps"
+
+                                    if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile && currentVerificationState != VerificationState.VERIFYING) {
+                                        setVerificationState(VerificationState.DETECTING)
+                                    }
+
+                                    val ctx = context
+                                    if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile && currentVerificationState != VerificationState.UNRECOGNIZED) {
+                                        performFaceVerification(frameBytes, width, height, face.boundingBox)
+                                    }
                                 }
                             }
                         }
@@ -1018,9 +1077,35 @@ class KioskCameraFragment : Fragment() {
 
             if (matchResult != null) {
                 val (matchedUser, similarity) = matchResult
-                val percentStr = String.format(Locale.getDefault(), "%.1f%%", similarity * 100)
+                val now = System.currentTimeMillis()
+
+                if (currentStreakStudentId == matchedUser.studentId && (now - lastStreakTimestamp) <= STREAK_TIMEOUT_MS) {
+                    currentStreakCount++
+                    currentStreakSimilaritySum += similarity
+                    lastStreakTimestamp = now
+                } else {
+                    currentStreakStudentId = matchedUser.studentId
+                    currentStreakCount = 1
+                    currentStreakSimilaritySum = similarity
+                    lastStreakTimestamp = now
+                }
+
+                val currentAvgSim = currentStreakSimilaritySum / currentStreakCount
+                val percentStr = String.format(Locale.getDefault(), "%.1f%%", currentAvgSim * 100)
                 val marginStr = String.format(Locale.getDefault(), "%.2f", matchResult.margin)
-                appendLog("✅ [FR] Kết quả MATCH: ID=${matchedUser.studentId}, Tương đồng=$percentStr >= ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)} | Margin=$marginStr")
+
+                // Temporal Multi-Frame Confirmation (Require 3 consecutive matching frames)
+                if (currentStreakCount < REQUIRED_CONSECUTIVE_MATCHES) {
+                    appendLog("⏳ [FR] Tiến trình xác thực: $currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES khung hình cho ${matchedUser.name} ($percentStr | Margin=$marginStr)")
+                    binding.tvRecognitionResultB.text = "⏳ Đang xác nhận: $currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES khung hình ($percentStr)..."
+                    binding.tvRecognitionResultB.setTextColor(0xFF29B6F6.toInt())
+                    setVerificationState(VerificationState.VERIFYING)
+                    return
+                }
+
+                // Completed required streak!
+                appendLog("✅ [FR] Xác thực thành công sau $currentStreakCount khung hình liên tiếp! ID=${matchedUser.studentId}, Tương đồng TB=$percentStr | Margin=$marginStr")
+                resetVerificationStreak()
 
                 // Tra cứu tài khoản theo định danh ID
                 val account = AccountRepository.findAccountById(matchedUser.studentId)
@@ -1093,6 +1178,7 @@ class KioskCameraFragment : Fragment() {
                     }
                 }, 1000)
             } else {
+                resetVerificationStreak()
                 appendLog("❌ [FR] Kết quả NO MATCH: Không có sinh viên nào trong DB đạt ngưỡng ${String.format(Locale.getDefault(), "%.1f%%", threshold * 100)}")
                 binding.tvRecognitionResultB.text = "❌ Không tìm thấy thông tin sinh viên phù hợp trong DB"
                 binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
