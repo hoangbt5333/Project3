@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import android.os.SystemClock
@@ -334,16 +335,97 @@ class KioskCameraFragment : Fragment() {
 
     private fun toggleTechMode() {
         isTechModeVisible = !isTechModeVisible
+        updateTechModeUI()
+    }
+
+    private fun updateTechModeUI() {
+        if (_binding == null) return
+        val density = resources.displayMetrics.density
+        val cs = ConstraintSet()
+        cs.clone(binding.cardStudentCameraView)
+
         if (isTechModeVisible) {
+            // 1. Show Technical Panel, Hide Student-only views
             binding.layoutTechnicalPanel.visibility = View.VISIBLE
-            binding.layoutStudentVerification.visibility = View.GONE
+            binding.tvInstructionHint.visibility = View.GONE
+            binding.cardVerificationStatus.visibility = View.GONE
+            binding.viewFaceGuideTarget.visibility = View.GONE
             binding.btnToggleTechMode.text = "👤 Chế độ SV"
             binding.tvCameraScreenTitle.text = "BẢNG KỸ THUẬT & CAMERA"
+            binding.tvBadgeIrA.text = "IR (Camera A)"
+
+            // 2. Adjust Camera Preview Container size for Tech Mode
+            val containerParams = binding.cardStudentCameraView.layoutParams as LinearLayout.LayoutParams
+            containerParams.height = (230 * density).toInt()
+            containerParams.weight = 0f
+            val m8 = (8 * density).toInt()
+            val m4 = (4 * density).toInt()
+            containerParams.setMargins(m8, m4, m8, m4)
+            binding.cardStudentCameraView.layoutParams = containerParams
+
+            // 3. Side-by-side Camera Layout in Tech Mode:
+            // Camera A (pipContainerA) on the LEFT (50%)
+            cs.clear(R.id.pipContainerA)
+            cs.connect(R.id.pipContainerA, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.pipContainerA, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.pipContainerA, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START, (4 * density).toInt())
+            cs.connect(R.id.pipContainerA, ConstraintSet.END, R.id.uvcSurfaceViewB, ConstraintSet.START, (2 * density).toInt())
+            cs.constrainWidth(R.id.pipContainerA, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.pipContainerA, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.pipContainerA, "4:3")
+
+            // Camera B (uvcSurfaceViewB) on the RIGHT (50%)
+            cs.clear(R.id.uvcSurfaceViewB)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.START, R.id.pipContainerA, ConstraintSet.END, (2 * density).toInt())
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, (4 * density).toInt())
+            cs.constrainWidth(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.uvcSurfaceViewB, "4:3")
+
+            cs.applyTo(binding.cardStudentCameraView)
         } else {
+            // 1. Hide Technical Panel, Show Student-only views
             binding.layoutTechnicalPanel.visibility = View.GONE
-            binding.layoutStudentVerification.visibility = View.VISIBLE
+            binding.tvInstructionHint.visibility = View.VISIBLE
+            binding.cardVerificationStatus.visibility = View.VISIBLE
+            binding.viewFaceGuideTarget.visibility = View.VISIBLE
             binding.btnToggleTechMode.text = "⚙️ Kỹ thuật"
             binding.tvCameraScreenTitle.text = "XÁC THỰC DANH TÍNH SINH VIÊN"
+            binding.tvBadgeIrA.text = "IR (Phụ)"
+
+            // 2. Adjust Camera Preview Container size for Student Mode (weight 1)
+            val containerParams = binding.cardStudentCameraView.layoutParams as LinearLayout.LayoutParams
+            containerParams.height = 0
+            containerParams.weight = 1f
+            val m20 = (20 * density).toInt()
+            containerParams.setMargins(m20, 0, m20, 0)
+            binding.cardStudentCameraView.layoutParams = containerParams
+
+            // 3. Full RGB + PIP IR Layout in Student Mode:
+            // Camera B (uvcSurfaceViewB) centered full
+            cs.clear(R.id.uvcSurfaceViewB)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+            cs.constrainWidth(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.uvcSurfaceViewB, "4:3")
+
+            // Camera A (pipContainerA) in bottom-right PIP corner
+            cs.clear(R.id.pipContainerA)
+            val pipW = (130 * density).toInt()
+            val pipH = (100 * density).toInt()
+            val m12 = (12 * density).toInt()
+            cs.connect(R.id.pipContainerA, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM, m12)
+            cs.connect(R.id.pipContainerA, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, m12)
+            cs.constrainWidth(R.id.pipContainerA, pipW)
+            cs.constrainHeight(R.id.pipContainerA, pipH)
+            cs.setDimensionRatio(R.id.pipContainerA, null)
+
+            cs.applyTo(binding.cardStudentCameraView)
         }
     }
 
@@ -406,7 +488,7 @@ class KioskCameraFragment : Fragment() {
                         UserRole.TECHNICIAN -> "Mã: ${account.accountId} • [BẢNG CHẨN ĐOÁN KỸ THUẬT]"
                     }
                 }
-                binding.layoutSuccessBanner.visibility = View.VISIBLE
+                binding.layoutSuccessBanner.visibility = if (isTechModeVisible) View.GONE else View.VISIBLE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_success))
             }
             VerificationState.UNRECOGNIZED -> {
