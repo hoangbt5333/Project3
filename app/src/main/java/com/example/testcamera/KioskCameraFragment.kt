@@ -429,7 +429,12 @@ class KioskCameraFragment : Fragment() {
 
         for ((index, devInfo) in uvcDevices.withIndex()) {
             val permText = if (devInfo.hasPermission) "✅ Đã cấp quyền" else "🔐 Chưa cấp quyền"
-            sb.append(" • Cam #${index + 1}: ${devInfo.productName ?: devInfo.deviceName} [${devInfo.getFormattedVidPid()}] - $permText\n")
+            val roleTag = when {
+                devInfo.isIrCamera -> " [IR CAM - 0xFF90]"
+                devInfo.isRgbCamera -> " [RGB CAM - 0xFF20]"
+                else -> ""
+            }
+            sb.append(" • Cam #${index + 1}: ${devInfo.productName ?: devInfo.deviceName} [${devInfo.getFormattedVidPid()}]$roleTag - $permText\n")
         }
 
         activity?.runOnUiThread {
@@ -446,20 +451,35 @@ class KioskCameraFragment : Fragment() {
             }
         }
 
-        if (uvcDevices.isNotEmpty()) {
-            assignedDeviceA = uvcDevices[0].device
-            updateDeviceInfoA(uvcDevices[0])
-        } else {
-            assignedDeviceA = null
-            updateDeviceInfoA(null)
-        }
+        // --- HARDWARE BINDING THEO PID ---
+        // Camera A = IR Camera (ZM-MTW172IR, PID 0xFF90)
+        // Camera B = RGB Camera (ZM-MTW172C, PID 0xFF20)
+        val irInfo = uvcDevices.find { it.isIrCamera }
+        val rgbInfo = uvcDevices.find { it.isRgbCamera }
 
-        if (uvcDevices.size > 1) {
-            assignedDeviceB = uvcDevices[1].device
-            updateDeviceInfoB(uvcDevices[1])
+        if (irInfo != null || rgbInfo != null) {
+            assignedDeviceA = irInfo?.device
+            updateDeviceInfoA(irInfo)
+
+            assignedDeviceB = rgbInfo?.device
+            updateDeviceInfoB(rgbInfo)
         } else {
-            assignedDeviceB = null
-            updateDeviceInfoB(null)
+            // FALLBACK CHO MÔI TRƯỜNG DEV (khi dùng webcam ngoài hoặc camera thử nghiệm khác)
+            if (uvcDevices.isNotEmpty()) {
+                assignedDeviceA = uvcDevices[0].device
+                updateDeviceInfoA(uvcDevices[0])
+            } else {
+                assignedDeviceA = null
+                updateDeviceInfoA(null)
+            }
+
+            if (uvcDevices.size > 1) {
+                assignedDeviceB = uvcDevices[1].device
+                updateDeviceInfoB(uvcDevices[1])
+            } else {
+                assignedDeviceB = null
+                updateDeviceInfoB(null)
+            }
         }
     }
 
@@ -468,10 +488,11 @@ class KioskCameraFragment : Fragment() {
             binding.tvDeviceInfoA.text = "Thiết bị: Chưa kết nối"
             binding.tvStatusBadgeA.text = "CHƯA PHÁT HIỆN"
             binding.tvStatusBadgeA.setBackgroundColor(0xFF555555.toInt())
-            binding.tvOverlayA.text = "Chưa cắm Cam A"
+            binding.tvOverlayA.text = "Chưa cắm Cam A (IR)"
             binding.tvOverlayA.visibility = View.VISIBLE
         } else {
-            binding.tvDeviceInfoA.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
+            val typeLabel = if (info.isIrCamera) " [IR]" else ""
+            binding.tvDeviceInfoA.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})$typeLabel"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeA.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFFE65100.toInt())
@@ -480,8 +501,10 @@ class KioskCameraFragment : Fragment() {
             } else if (mCameraA?.isCameraOpened() != true) {
                 binding.tvStatusBadgeA.text = "SẴN SÀNG"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFF1565C0.toInt())
-                binding.tvOverlayA.text = "Sẵn sàng mở"
+                binding.tvOverlayA.text = "Camera IR sẵn sàng. Đang kết nối luồng video..."
                 binding.tvOverlayA.visibility = View.VISIBLE
+                // Tự động kết nối Camera A (IR) nếu đã có quyền
+                connectCameraA()
             }
         }
     }
@@ -495,7 +518,8 @@ class KioskCameraFragment : Fragment() {
             binding.tvOverlayB.visibility = View.VISIBLE
             setVerificationState(VerificationState.CAMERA_CONNECTING)
         } else {
-            binding.tvDeviceInfoB.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
+            val typeLabel = if (info.isRgbCamera) " [RGB]" else ""
+            binding.tvDeviceInfoB.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})$typeLabel"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeB.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeB.setBackgroundColor(0xFFE65100.toInt())
@@ -552,17 +576,29 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun onDeviceConnected(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
-            openCameraPanelA(device, ctrlBlock)
-        } else if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
-            openCameraPanelB(device, ctrlBlock)
-        } else {
-            if (assignedDeviceA == null) {
+        when {
+            UsbDiagnosticHelper.isIrCamera(device) -> {
                 assignedDeviceA = device
                 openCameraPanelA(device, ctrlBlock)
-            } else if (assignedDeviceB == null) {
+            }
+            UsbDiagnosticHelper.isRgbCamera(device) -> {
                 assignedDeviceB = device
                 openCameraPanelB(device, ctrlBlock)
+            }
+            assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device) -> {
+                openCameraPanelA(device, ctrlBlock)
+            }
+            assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device) -> {
+                openCameraPanelB(device, ctrlBlock)
+            }
+            else -> {
+                if (assignedDeviceA == null) {
+                    assignedDeviceA = device
+                    openCameraPanelA(device, ctrlBlock)
+                } else if (assignedDeviceB == null) {
+                    assignedDeviceB = device
+                    openCameraPanelB(device, ctrlBlock)
+                }
             }
         }
     }
@@ -1375,23 +1411,27 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun onDeviceDetached(device: UsbDevice) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
-            appendLog("🔌 Ngắt kết nối USB Camera A")
+        if (UsbDiagnosticHelper.isIrCamera(device) || assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
+            appendLog("🔌 Ngắt kết nối USB Camera A (IR)")
             closeCameraA()
+            assignedDeviceA = null
         }
-        if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
-            appendLog("🔌 Ngắt kết nối USB Camera B")
+        if (UsbDiagnosticHelper.isRgbCamera(device) || assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
+            appendLog("🔌 Ngắt kết nối USB Camera B (RGB)")
             closeCameraB()
+            assignedDeviceB = null
         }
         refreshUsbDevices()
     }
 
     private fun onDeviceDisconnected(device: UsbDevice) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
+        if (UsbDiagnosticHelper.isIrCamera(device) || assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
             closeCameraA()
+            assignedDeviceA = null
         }
-        if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
+        if (UsbDiagnosticHelper.isRgbCamera(device) || assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
             closeCameraB()
+            assignedDeviceB = null
         }
     }
 
