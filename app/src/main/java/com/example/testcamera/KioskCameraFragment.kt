@@ -13,6 +13,7 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -123,6 +124,11 @@ class KioskCameraFragment : Fragment() {
     // Multi-Sample Enrollment (Phase 5)
     private var pendingRegistrationAccount: UserAccount? = null
     private val enrollmentSamples = mutableListOf<FloatArray>()
+
+    // Disabled Account Dialog & Cooldown
+    private var isShowingDisabledAccountDialog = false
+    private var disabledAccountCooldownUntil = 0L
+    private var disabledAccountDialog: AlertDialog? = null
 
     private fun resetVerificationStreak() {
         currentStreakStudentId = null
@@ -285,6 +291,9 @@ class KioskCameraFragment : Fragment() {
             resetVerificationStreak()
             setVerificationState(VerificationState.IDLE)
             isAutoVerificationEnabled = true
+            if (mCameraB == null || mCameraB?.isCameraOpened() != true) {
+                connectCameraB()
+            }
         }
 
         // Panel A Buttons
@@ -673,7 +682,9 @@ class KioskCameraFragment : Fragment() {
                             binding.tvOverlayB.visibility = View.VISIBLE
                             binding.faceOverlayB.clear()
                             binding.tvFaceStatusB.text = "👤 ML Kit: Camera B đã đóng"
-                            setVerificationState(VerificationState.CAMERA_CONNECTING)
+                            if (!isShowingDisabledAccountDialog) {
+                                setVerificationState(VerificationState.CAMERA_CONNECTING)
+                            }
                         }
                         ICameraStateCallBack.State.ERROR -> {
                             appendLog("❌ Camera B Lỗi: ${msg ?: "Không xác định"}")
@@ -683,7 +694,9 @@ class KioskCameraFragment : Fragment() {
                             binding.tvOverlayB.visibility = View.VISIBLE
                             binding.faceOverlayB.clear()
                             binding.tvFaceStatusB.text = "⚠️ ML Kit: Tạm dừng do lỗi Camera B"
-                            setVerificationState(VerificationState.CAMERA_CONNECTING)
+                            if (!isShowingDisabledAccountDialog) {
+                                setVerificationState(VerificationState.CAMERA_CONNECTING)
+                            }
                         }
                     }
                 }
@@ -710,7 +723,7 @@ class KioskCameraFragment : Fragment() {
 
     private fun processFaceDetectionFrame(nv21Data: ByteArray) {
         val detector = faceDetector ?: return
-        if (isProcessingFaceFrame.get() || isNavigatingToProfile) {
+        if (isProcessingFaceFrame.get() || isNavigatingToProfile || isShowingDisabledAccountDialog) {
             return
         }
 
@@ -736,7 +749,7 @@ class KioskCameraFragment : Fragment() {
                 .addOnSuccessListener { faces ->
                     faceDetectCount++
                     activity?.runOnUiThread {
-                        if (_binding != null) {
+                        if (_binding != null && !isShowingDisabledAccountDialog) {
                             if (faces.isEmpty()) {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
@@ -1176,11 +1189,20 @@ class KioskCameraFragment : Fragment() {
 
                 // Kiểm tra trạng thái tài khoản
                 if (!account.isActive()) {
+                    val now = System.currentTimeMillis()
+                    if (now < disabledAccountCooldownUntil) {
+                        appendLog("⏳ [RBAC] Đang trong thời gian chờ (cooldown) sau cảnh báo tài khoản bị khóa: ${account.displayName}")
+                        return
+                    }
+
                     appendLog("⛔ [RBAC] TỪ CHỐI TRUY CẬP: Tài khoản ${account.displayName} (${account.accountId}) đang ở trạng thái ${account.status.description}")
                     val resultText = "⛔ TÀI KHOẢN BỊ VÔ HIỆU HÓA!\n${account.displayName} (${account.accountId})\nVui lòng liên hệ ban quản trị Kiosk để được hỗ trợ."
                     binding.tvRecognitionResultB.text = resultText
                     binding.tvRecognitionResultB.setTextColor(0xFFFF5252.toInt())
                     setVerificationState(VerificationState.ACCOUNT_DISABLED, account)
+
+                    // Dừng luồng camera và hiển thị popup cảnh báo
+                    showDisabledAccountPopup(account)
                     return
                 }
 
@@ -1272,6 +1294,66 @@ class KioskCameraFragment : Fragment() {
         } else {
             binding.tvRecognitionResultB.text = "🆔 Đã đăng ký khuôn mặt cho $count sinh viên | Sẵn sàng so khớp"
             binding.tvRecognitionResultB.setTextColor(0xFF29B6F6.toInt())
+        }
+    }
+
+    private fun showDisabledAccountPopup(account: UserAccount) {
+        val ctx = context ?: return
+        if (isShowingDisabledAccountDialog) return
+        isShowingDisabledAccountDialog = true
+
+        // Xóa streak và overlay nhận diện
+        resetVerificationStreak()
+        binding.faceOverlayB.clear()
+
+        // Dừng luồng Camera B
+        appendLog("⏹️ Dừng luồng Camera B do tài khoản ${account.displayName} (${account.accountId}) bị vô hiệu hóa.")
+        closeCameraB()
+
+        try {
+            val dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_account_disabled, null)
+            val tvName = dialogView.findViewById<TextView>(R.id.tvDisabledStudentName)
+            val tvId = dialogView.findViewById<TextView>(R.id.tvDisabledStudentId)
+            val tvClass = dialogView.findViewById<TextView>(R.id.tvDisabledStudentClass)
+            val tvStatus = dialogView.findViewById<TextView>(R.id.tvDisabledStatus)
+            val btnConfirm = dialogView.findViewById<Button>(R.id.btnConfirmDisabledAccount)
+
+            tvName.text = account.displayName
+            tvId.text = "Mã tài khoản: ${account.accountId}"
+            tvClass.text = if (account.isStudent()) {
+                "Lớp: ${account.studentDetails?.className ?: "N/A"} • Khoa: ${account.studentDetails?.faculty ?: "N/A"}"
+            } else {
+                "Vai trò: ${account.role.displayName}"
+            }
+            tvStatus.text = "TRẠNG THÁI: ${account.status.description.uppercase()}"
+
+            val dialog = AlertDialog.Builder(ctx)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+            btnConfirm.setOnClickListener {
+                dialog.dismiss()
+                disabledAccountDialog = null
+                isShowingDisabledAccountDialog = false
+                disabledAccountCooldownUntil = System.currentTimeMillis() + 4000L // 4s cooldown để người dùng rời khỏi camera
+                resetVerificationStreak()
+                binding.faceOverlayB.clear()
+                setVerificationState(VerificationState.IDLE)
+                binding.tvRecognitionResultB.text = "👤 Camera sẵn sàng nhận diện"
+                binding.tvRecognitionResultB.setTextColor(0xFF888888.toInt())
+                appendLog("▶️ Đã xác nhận thông báo tài khoản vô hiệu hóa. Khởi động lại luồng Camera B...")
+                connectCameraB()
+            }
+
+            disabledAccountDialog = dialog
+            dialog.show()
+        } catch (e: Exception) {
+            appendLog("❌ Lỗi khi hiển thị popup tài khoản bị khóa: ${e.message}")
+            isShowingDisabledAccountDialog = false
+            connectCameraB()
         }
     }
 
@@ -1454,6 +1536,14 @@ class KioskCameraFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         mainHandler.removeCallbacks(fpsRunnable)
+
+        try {
+            disabledAccountDialog?.dismiss()
+            disabledAccountDialog = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        isShowingDisabledAccountDialog = false
 
         closeCameraA()
         closeCameraB()

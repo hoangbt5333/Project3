@@ -1,8 +1,11 @@
 package com.example.testcamera
 
+import com.example.testcamera.data.AccountRepository
+import com.example.testcamera.data.AccountStatus
 import com.example.testcamera.data.Student
 import com.example.testcamera.data.StudentRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,5 +42,19 @@ class KioskLogicTest {
         assertTrue(states.contains(KioskCameraFragment.VerificationState.SUCCESS))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.UNRECOGNIZED))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.ACCOUNT_DISABLED))
+    }
+
+    @Test
+    fun testDisabledAccountStatusAndVerification() {
+        val activeAccount = AccountRepository.findAccountById("20231001")
+        assertNotNull(activeAccount)
+        assertTrue(activeAccount!!.isActive())
+        assertEquals(AccountStatus.ACTIVE, activeAccount.status)
+
+        val disabledAccount = AccountRepository.findAccountById("20231012")
+        assertNotNull(disabledAccount)
+        assertFalse(disabledAccount!!.isActive())
+        assertEquals(AccountStatus.DISABLED, disabledAccount.status)
+        assertEquals("Bị vô hiệu hóa", disabledAccount.status.description)
     }
 }
