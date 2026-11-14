@@ -11,7 +11,6 @@ import java.nio.channels.FileChannel
 import kotlin.math.sqrt
 
 class FaceNetModel(context: Context) {
-
     companion object {
         const val INPUT_IMAGE_SIZE = 112
         const val EMBEDDING_SIZE = 192

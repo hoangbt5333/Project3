@@ -21,6 +21,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import android.os.SystemClock
 import com.example.testcamera.data.AccountRepository
 import com.example.testcamera.data.AccountStatus
 import com.example.testcamera.data.KioskSessionManager
@@ -32,7 +33,10 @@ import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.data.UserRole
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
 import com.example.testcamera.ml.FaceNetModel
+import com.example.testcamera.util.IrMetrics
+import com.example.testcamera.util.IrOpticalAnalyzer
 import com.example.testcamera.util.NV21ToBitmapConverter
+import com.example.testcamera.util.ParallaxMapper
 import com.example.testcamera.util.UsbDeviceInfo
 import com.example.testcamera.util.UsbDiagnosticHelper
 import com.google.mlkit.vision.common.InputImage
@@ -87,11 +91,16 @@ class KioskCameraFragment : Fragment() {
 
     private var mMultiCameraClient: MultiCameraClient? = null
 
-    // Panel A (Camera 1 / Thermal)
+    // Panel A (Camera 1 / IR Anti-Spoofing)
     private var assignedDeviceA: UsbDevice? = null
     private var mCameraA: MultiCameraClient.Camera? = null
     private var frameCountA = 0
     private var fpsA = 0
+    @Volatile private var latestIrFrameBytes: ByteArray? = null
+    @Volatile private var latestIrTimestamp: Long = 0L
+    private var latestIrWidth = 640
+    private var latestIrHeight = 480
+    private var latestIrMetrics: IrMetrics? = null
 
     // Panel B (Camera 2 / RGB)
     private var assignedDeviceB: UsbDevice? = null
@@ -195,6 +204,8 @@ class KioskCameraFragment : Fragment() {
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
+                .enableTracking()
                 .setMinFaceSize(0.15f)
                 .build()
             faceDetector = FaceDetection.getClient(options)
@@ -634,6 +645,8 @@ class KioskCameraFragment : Fragment() {
                             appendLog("🟢 Camera A: Đã mở luồng video thành công!")
                             self.getPreviewSize()?.let { size ->
                                 updatePreviewAspectRatio(binding.uvcSurfaceViewA, size.width, size.height)
+                                latestIrWidth = size.width
+                                latestIrHeight = size.height
                             }
                             binding.tvStatusBadgeA.text = "STREAMING"
                             binding.tvStatusBadgeA.setBackgroundColor(0xFF2E7D32.toInt())
@@ -661,6 +674,10 @@ class KioskCameraFragment : Fragment() {
         camera.addPreviewDataCallBack(object : IPreviewDataCallBack {
             override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
                 frameCountA++
+                if (data != null) {
+                    latestIrFrameBytes = data.clone()
+                    latestIrTimestamp = SystemClock.elapsedRealtime()
+                }
             }
         })
 
@@ -776,8 +793,11 @@ class KioskCameraFragment : Fragment() {
                             if (faces.isEmpty()) {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
+                                latestIrMetrics = null
                                 resetVerificationStreak()
                                 binding.faceOverlayB.clear()
+                                binding.faceOverlayA.clear()
+                                binding.tvIrTelemetryA.text = "IR Quang phổ: Chờ phát hiện mặt..."
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
 
                                 if (currentVerificationState == VerificationState.DETECTING || currentVerificationState == VerificationState.VERIFYING) {
@@ -807,6 +827,26 @@ class KioskCameraFragment : Fragment() {
                                 latestFrameHeight = height
 
                                 binding.faceOverlayB.setFaces(listOf(face), width, height)
+
+                                // Hiệu chuẩn và phân tích quang phổ IR (Giai đoạn 2)
+                                val rgbTimestamp = SystemClock.elapsedRealtime()
+                                val irBytes = latestIrFrameBytes
+                                val irW = latestIrWidth
+                                val irH = latestIrHeight
+                                val deltaTimestamp = Math.abs(rgbTimestamp - latestIrTimestamp)
+                                val irBox = ParallaxMapper.mapRgbToIr(box, width, height, irW, irH)
+
+                                binding.faceOverlayA.setCustomRects(listOf(irBox), irW, irH)
+
+                                if (irBytes != null && deltaTimestamp <= 300) {
+                                    val metrics = IrOpticalAnalyzer.analyze(irBytes, irW, irH, irBox)
+                                    latestIrMetrics = metrics
+                                    binding.tvIrTelemetryA.text = "IR: ${metrics.toTelemetryString(deltaTimestamp)}"
+                                    binding.faceOverlayA.setHighlightColor(if (metrics.isPass) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt())
+                                } else {
+                                    binding.tvIrTelemetryA.text = "IR: Lệch khung hình (Δt: ${deltaTimestamp}ms)"
+                                    binding.faceOverlayA.setHighlightColor(0xFFFF9800.toInt())
+                                }
 
                                 // Quality checks: face size, head pose angles, and boundary clipping
                                 val isSizeOk = box.width() >= MIN_FACE_PIXEL_SIZE && box.height() >= MIN_FACE_PIXEL_SIZE
@@ -1318,6 +1358,15 @@ class KioskCameraFragment : Fragment() {
                 appendLog("⏹️ Đã đóng Camera A.")
             }
             mCameraA = null
+            latestIrFrameBytes = null
+            latestIrTimestamp = 0L
+            latestIrMetrics = null
+            activity?.runOnUiThread {
+                if (_binding != null) {
+                    binding.faceOverlayA.clear()
+                    binding.tvIrTelemetryA.text = "IR Quang phổ: Camera A đã đóng"
+                }
+            }
         } catch (e: Exception) {
             appendLog("⚠️ Lỗi khi đóng Camera A: ${e.message}")
         }

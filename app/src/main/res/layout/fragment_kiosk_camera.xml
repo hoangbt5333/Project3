@@ -188,6 +188,15 @@
                         app:layout_constraintEnd_toEndOf="parent"
                         app:layout_constraintDimensionRatio="4:3" />
 
+                    <com.example.testcamera.ui.FaceOverlayView
+                        android:id="@+id/faceOverlayA"
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        app:layout_constraintTop_toTopOf="@id/uvcSurfaceViewA"
+                        app:layout_constraintBottom_toBottomOf="@id/uvcSurfaceViewA"
+                        app:layout_constraintStart_toStartOf="@id/uvcSurfaceViewA"
+                        app:layout_constraintEnd_toEndOf="@id/uvcSurfaceViewA" />
+
                     <TextView
                         android:id="@+id/tvOverlayA"
                         android:layout_width="wrap_content"
@@ -408,6 +417,15 @@
                             android:text="Độ phân giải: -- | FPS: 0"
                             android:textColor="#00E676"
                             android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvIrTelemetryA"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="IR Quang phổ: Chờ tín hiệu..."
+                            android:textColor="#FFEB3B"
+                            android:textSize="10sp"
+                            android:paddingTop="2dp" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
