@@ -22,11 +22,33 @@ data class UsbDeviceInfo(
     fun getFormattedVidPid(): String {
         return String.format("VID: 0x%04X, PID: 0x%04X", vendorId, productId)
     }
+
+    val isRgbCamera: Boolean get() = UsbDiagnosticHelper.isRgbCamera(device)
+    val isIrCamera: Boolean get() = UsbDiagnosticHelper.isIrCamera(device)
 }
 
 object UsbDiagnosticHelper {
 
     const val ACTION_USB_PERMISSION = "com.example.testcamera.ACTION_USB_PERMISSION"
+
+    // Kiosk Dual Camera Hardware Constants
+    const val VID_KIOSK_CAMERAS = 0x1871
+    const val PID_RGB_CAMERA = 0xFF20   // ZM-MTW172C: Camera B (RGB - Face Recognition)
+    const val PID_IR_CAMERA = 0xFF90    // ZM-MTW172IR: Camera A (IR - Face Anti-Spoofing)
+
+    fun isRgbCamera(device: UsbDevice?): Boolean {
+        if (device == null) return false
+        return device.productId == PID_RGB_CAMERA
+    }
+
+    fun isIrCamera(device: UsbDevice?): Boolean {
+        if (device == null) return false
+        return device.productId == PID_IR_CAMERA
+    }
+
+    fun isKioskCamera(device: UsbDevice?): Boolean {
+        return isRgbCamera(device) || isIrCamera(device)
+    }
 
     fun getConnectedUsbDevices(context: Context): List<UsbDeviceInfo> {
         val usbManager = (context.getSystemService(Context.USB_SERVICE) as? UsbManager)

@@ -20,8 +20,10 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import android.os.SystemClock
 import com.example.testcamera.data.AccountRepository
 import com.example.testcamera.data.AccountStatus
 import com.example.testcamera.data.KioskSessionManager
@@ -32,8 +34,17 @@ import com.example.testcamera.data.UserFaceModel
 import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.data.UserRole
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
+import com.example.testcamera.ml.AntiSpoofingEngine
+import com.example.testcamera.ml.AttackScenario
 import com.example.testcamera.ml.FaceNetModel
+import com.example.testcamera.ml.LivenessBenchmarkLogger
+import com.example.testcamera.ml.LivenessMode
+import com.example.testcamera.ml.LivenessResult
+import com.example.testcamera.ml.TestDistance
+import com.example.testcamera.util.IrMetrics
+import com.example.testcamera.util.IrOpticalAnalyzer
 import com.example.testcamera.util.NV21ToBitmapConverter
+import com.example.testcamera.util.ParallaxMapper
 import com.example.testcamera.util.UsbDeviceInfo
 import com.example.testcamera.util.UsbDiagnosticHelper
 import com.google.mlkit.vision.common.InputImage
@@ -62,6 +73,8 @@ class KioskCameraFragment : Fragment() {
         private const val MIN_FACE_PIXEL_SIZE = 90
         private const val MAX_HEAD_POSE_DEGREE = 18f
         private const val REQUIRED_ENROLLMENT_SAMPLES = 3
+        private const val REQUIRED_LIVENESS_FRAMES = 3
+        private const val LIVENESS_SAMPLE_INTERVAL_MS = 200L
 
         fun newInstance(openInTechMode: Boolean = false): KioskCameraFragment {
             val fragment = KioskCameraFragment()
@@ -77,6 +90,8 @@ class KioskCameraFragment : Fragment() {
         CAMERA_CONNECTING,
         IDLE,
         DETECTING,
+        CHECKING_LIVENESS,
+        LIVENESS_FAILED,
         VERIFYING,
         SUCCESS,
         UNRECOGNIZED,
@@ -88,11 +103,16 @@ class KioskCameraFragment : Fragment() {
 
     private var mMultiCameraClient: MultiCameraClient? = null
 
-    // Panel A (Camera 1 / Thermal)
+    // Panel A (Camera 1 / IR Anti-Spoofing)
     private var assignedDeviceA: UsbDevice? = null
     private var mCameraA: MultiCameraClient.Camera? = null
     private var frameCountA = 0
     private var fpsA = 0
+    @Volatile private var latestIrFrameBytes: ByteArray? = null
+    @Volatile private var latestIrTimestamp: Long = 0L
+    private var latestIrWidth = 640
+    private var latestIrHeight = 480
+    private var latestIrMetrics: IrMetrics? = null
 
     // Panel B (Camera 2 / RGB)
     private var assignedDeviceB: UsbDevice? = null
@@ -105,6 +125,48 @@ class KioskCameraFragment : Fragment() {
     private val isProcessingFaceFrame = AtomicBoolean(false)
     private var faceDetectCount = 0
     private var faceDetectFps = 0
+
+    // Anti-Spoofing & Liveness Engine (Stage 3 & 4)
+    private var antiSpoofingEngine: AntiSpoofingEngine? = null
+    private var benchmarkLogger: LivenessBenchmarkLogger? = null
+    private var currentTrackingId: Int? = null
+    private var isLivenessVerified = false
+    private var livenessPassStreak = 0
+    private var lastLivenessSampleTimestamp = 0L
+    private var consecutiveSpoofFailures = 0
+    private var livenessCooldownUntilMs = 0L
+    private var latestLivenessResult: LivenessResult? = null
+
+    private fun resetLivenessStreak() {
+        currentTrackingId = null
+        isLivenessVerified = false
+        livenessPassStreak = 0
+    }
+
+    private fun updateBenchmarkUI() {
+        if (_binding == null) return
+        val logger = benchmarkLogger ?: return
+        val stats = logger.getInMemoryStats()
+        binding.tvBenchmarkSummary.text = String.format(
+            Locale.US,
+            "Mẫu: %d | APCER: %.1f%% (%d/%d) | BPCER: %.1f%% (%d/%d) | ACER: %.1f%%",
+            stats.totalSamples,
+            stats.apcer * 100f,
+            stats.attackFalseAcceptCount,
+            stats.attackCount,
+            stats.bpcer * 100f,
+            stats.bonaFideFalseRejectCount,
+            stats.bonaFideCount,
+            stats.acer * 100f
+        )
+        binding.btnToggleBenchmarkRecording.text = if (logger.isRecording) {
+            "⏹️ Dừng Ghi (${logger.getRecordsCount()})"
+        } else {
+            "🔴 Bắt đầu Ghi (${logger.getRecordsCount()})"
+        }
+        binding.btnSelectAttackScenario.text = "🎯 ${logger.currentScenario.displayName}"
+        binding.btnSelectTestDistance.text = "📏 ${logger.currentDistance.label}"
+    }
 
     // Face Recognition (Phase 3 & 4)
     private var faceNetModel: FaceNetModel? = null
@@ -181,6 +243,7 @@ class KioskCameraFragment : Fragment() {
 
         initFaceDetector()
         initFaceRecognitionModel()
+        initAntiSpoofingEngine()
         initMultiCameraClient()
         setupListeners()
 
@@ -201,6 +264,8 @@ class KioskCameraFragment : Fragment() {
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                 .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
                 .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
+                .enableTracking()
                 .setMinFaceSize(0.15f)
                 .build()
             faceDetector = FaceDetection.getClient(options)
@@ -225,6 +290,23 @@ class KioskCameraFragment : Fragment() {
             }
         } catch (e: Exception) {
             appendLog("⚠️ Khởi tạo Face Recognition Model: ${e.message}")
+        }
+    }
+
+    private fun initAntiSpoofingEngine() {
+        try {
+            val ctx = context ?: return
+            benchmarkLogger = LivenessBenchmarkLogger.getInstance(ctx)
+            antiSpoofingEngine = AntiSpoofingEngine(ctx)
+            if (antiSpoofingEngine?.isModelReady() == true) {
+                appendLog("✅ Khởi tạo AntiSpoofingEngine (MiniFASNetV2 + IR Hybrid) thành công.")
+            } else {
+                val errorMsg = antiSpoofingEngine?.loadError ?: "Không tìm thấy tệp silentface.tflite trong assets"
+                appendLog("❌ [LỖI FAS TFLITE] Mô hình chưa sẵn sàng: $errorMsg")
+            }
+            updateBenchmarkUI()
+        } catch (e: Exception) {
+            appendLog("⚠️ Khởi tạo Anti-Spoofing Engine: ${e.message}")
         }
     }
 
@@ -289,11 +371,74 @@ class KioskCameraFragment : Fragment() {
 
         binding.btnRetryVerification.setOnClickListener {
             resetVerificationStreak()
+            resetLivenessStreak()
+            livenessCooldownUntilMs = 0L
+            consecutiveSpoofFailures = 0
             setVerificationState(VerificationState.IDLE)
             isAutoVerificationEnabled = true
             if (mCameraB == null || mCameraB?.isCameraOpened() != true) {
                 connectCameraB()
             }
+        }
+
+        binding.btnToggleLivenessMode.setOnClickListener {
+            val engine = antiSpoofingEngine ?: return@setOnClickListener
+            engine.mode = when (engine.mode) {
+                LivenessMode.HYBRID_AND -> LivenessMode.RGB_ONLY
+                LivenessMode.RGB_ONLY -> LivenessMode.IR_ONLY
+                LivenessMode.IR_ONLY -> LivenessMode.HYBRID_AND
+            }
+            val modeLabel = when (engine.mode) {
+                LivenessMode.HYBRID_AND -> "HYBRID (IR + RGB)"
+                LivenessMode.RGB_ONLY -> "CHỈ RGB (MiniFASNet)"
+                LivenessMode.IR_ONLY -> "CHỈ IR (Quang phổ)"
+            }
+            binding.btnToggleLivenessMode.text = "🛡️ Chế độ Liveness: $modeLabel"
+            appendLog("🛡️ Chuyển chế độ Liveness: $modeLabel")
+            Toast.makeText(context, "Chế độ Liveness: $modeLabel", Toast.LENGTH_SHORT).show()
+        }
+
+        // Benchmark & Evaluation Listeners (Stage 5)
+        binding.btnSelectAttackScenario.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.currentScenario = logger.currentScenario.next()
+            updateBenchmarkUI()
+            appendLog("🎯 Chọn kịch bản kiểm thử: ${logger.currentScenario.displayName}")
+        }
+
+        binding.btnSelectTestDistance.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.currentDistance = logger.currentDistance.next()
+            updateBenchmarkUI()
+            appendLog("📏 Chọn khoảng cách đo: ${logger.currentDistance.label}")
+        }
+
+        binding.btnToggleBenchmarkRecording.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            val isRec = logger.toggleRecording()
+            if (isRec) {
+                appendLog("🔴 [BENCHMARK] Bắt đầu phiên ghi log dữ liệu...")
+            } else {
+                appendLog("⏹️ [BENCHMARK] Đã dừng ghi log dữ liệu. Tổng số mẫu: ${logger.getRecordsCount()}")
+            }
+            updateBenchmarkUI()
+        }
+
+        binding.btnExportBenchmarkStats.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            val summary = logger.getFormattedSummary()
+            val file = logger.getBenchmarkFile()
+            appendLog("📁 [BENCHMARK EXPORT]\n$summary\n📄 File CSV: ${file.absolutePath} (${if (file.exists()) file.length() else 0} bytes)")
+            Toast.makeText(context, "Đã xuất thống kê! Xem trong Log Console.", Toast.LENGTH_LONG).show()
+            updateBenchmarkUI()
+        }
+
+        binding.btnClearBenchmarkData.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.clearAllData()
+            updateBenchmarkUI()
+            appendLog("🗑️ Đã xóa sạch dữ liệu Benchmark trong bộ nhớ và file CSV.")
+            Toast.makeText(context, "Đã xóa log benchmark!", Toast.LENGTH_SHORT).show()
         }
 
         // Panel A Buttons
@@ -332,16 +477,97 @@ class KioskCameraFragment : Fragment() {
 
     private fun toggleTechMode() {
         isTechModeVisible = !isTechModeVisible
+        updateTechModeUI()
+    }
+
+    private fun updateTechModeUI() {
+        if (_binding == null) return
+        val density = resources.displayMetrics.density
+        val cs = ConstraintSet()
+        cs.clone(binding.cardStudentCameraView)
+
         if (isTechModeVisible) {
+            // 1. Show Technical Panel, Hide Student-only views
             binding.layoutTechnicalPanel.visibility = View.VISIBLE
-            binding.layoutStudentVerification.visibility = View.GONE
+            binding.tvInstructionHint.visibility = View.GONE
+            binding.cardVerificationStatus.visibility = View.GONE
+            binding.viewFaceGuideTarget.visibility = View.GONE
             binding.btnToggleTechMode.text = "👤 Chế độ SV"
             binding.tvCameraScreenTitle.text = "BẢNG KỸ THUẬT & CAMERA"
+            binding.tvBadgeIrA.text = "IR (Camera A)"
+
+            // 2. Adjust Camera Preview Container size for Tech Mode
+            val containerParams = binding.cardStudentCameraView.layoutParams as LinearLayout.LayoutParams
+            containerParams.height = (230 * density).toInt()
+            containerParams.weight = 0f
+            val m8 = (8 * density).toInt()
+            val m4 = (4 * density).toInt()
+            containerParams.setMargins(m8, m4, m8, m4)
+            binding.cardStudentCameraView.layoutParams = containerParams
+
+            // 3. Side-by-side Camera Layout in Tech Mode:
+            // Camera A (pipContainerA) on the LEFT (50%)
+            cs.clear(R.id.pipContainerA)
+            cs.connect(R.id.pipContainerA, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.pipContainerA, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.pipContainerA, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START, (4 * density).toInt())
+            cs.connect(R.id.pipContainerA, ConstraintSet.END, R.id.uvcSurfaceViewB, ConstraintSet.START, (2 * density).toInt())
+            cs.constrainWidth(R.id.pipContainerA, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.pipContainerA, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.pipContainerA, "4:3")
+
+            // Camera B (uvcSurfaceViewB) on the RIGHT (50%)
+            cs.clear(R.id.uvcSurfaceViewB)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.START, R.id.pipContainerA, ConstraintSet.END, (2 * density).toInt())
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, (4 * density).toInt())
+            cs.constrainWidth(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.uvcSurfaceViewB, "4:3")
+
+            cs.applyTo(binding.cardStudentCameraView)
         } else {
+            // 1. Hide Technical Panel, Show Student-only views
             binding.layoutTechnicalPanel.visibility = View.GONE
-            binding.layoutStudentVerification.visibility = View.VISIBLE
+            binding.tvInstructionHint.visibility = View.VISIBLE
+            binding.cardVerificationStatus.visibility = View.VISIBLE
+            binding.viewFaceGuideTarget.visibility = View.VISIBLE
             binding.btnToggleTechMode.text = "⚙️ Kỹ thuật"
             binding.tvCameraScreenTitle.text = "XÁC THỰC DANH TÍNH SINH VIÊN"
+            binding.tvBadgeIrA.text = "IR (Phụ)"
+
+            // 2. Adjust Camera Preview Container size for Student Mode (weight 1)
+            val containerParams = binding.cardStudentCameraView.layoutParams as LinearLayout.LayoutParams
+            containerParams.height = 0
+            containerParams.weight = 1f
+            val m20 = (20 * density).toInt()
+            containerParams.setMargins(m20, 0, m20, 0)
+            binding.cardStudentCameraView.layoutParams = containerParams
+
+            // 3. Full RGB + PIP IR Layout in Student Mode:
+            // Camera B (uvcSurfaceViewB) centered full
+            cs.clear(R.id.uvcSurfaceViewB)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START)
+            cs.connect(R.id.uvcSurfaceViewB, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END)
+            cs.constrainWidth(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.constrainHeight(R.id.uvcSurfaceViewB, ConstraintSet.MATCH_CONSTRAINT)
+            cs.setDimensionRatio(R.id.uvcSurfaceViewB, "4:3")
+
+            // Camera A (pipContainerA) in bottom-right PIP corner
+            cs.clear(R.id.pipContainerA)
+            val pipW = (130 * density).toInt()
+            val pipH = (100 * density).toInt()
+            val m12 = (12 * density).toInt()
+            cs.connect(R.id.pipContainerA, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM, m12)
+            cs.connect(R.id.pipContainerA, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END, m12)
+            cs.constrainWidth(R.id.pipContainerA, pipW)
+            cs.constrainHeight(R.id.pipContainerA, pipH)
+            cs.setDimensionRatio(R.id.pipContainerA, null)
+
+            cs.applyTo(binding.cardStudentCameraView)
         }
     }
 
@@ -377,6 +603,24 @@ class KioskCameraFragment : Fragment() {
                 binding.layoutSuccessBanner.visibility = View.GONE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
             }
+            VerificationState.CHECKING_LIVENESS -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_gold))
+                binding.tvStatusTitle.text = "Kiểm tra độ sống khuôn mặt..."
+                binding.tvStatusMessage.text = "Vui lòng giữ nguyên vị trí và nhìn thẳng..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+            }
+            VerificationState.LIVENESS_FAILED -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_alert)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_warning))
+                binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại cảm biến..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
+            }
             VerificationState.VERIFYING -> {
                 binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
                 binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_red))
@@ -404,7 +648,7 @@ class KioskCameraFragment : Fragment() {
                         UserRole.TECHNICIAN -> "Mã: ${account.accountId} • [BẢNG CHẨN ĐOÁN KỸ THUẬT]"
                     }
                 }
-                binding.layoutSuccessBanner.visibility = View.VISIBLE
+                binding.layoutSuccessBanner.visibility = if (isTechModeVisible) View.GONE else View.VISIBLE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_success))
             }
             VerificationState.UNRECOGNIZED -> {
@@ -438,7 +682,12 @@ class KioskCameraFragment : Fragment() {
 
         for ((index, devInfo) in uvcDevices.withIndex()) {
             val permText = if (devInfo.hasPermission) "✅ Đã cấp quyền" else "🔐 Chưa cấp quyền"
-            sb.append(" • Cam #${index + 1}: ${devInfo.productName ?: devInfo.deviceName} [${devInfo.getFormattedVidPid()}] - $permText\n")
+            val roleTag = when {
+                devInfo.isIrCamera -> " [IR CAM - 0xFF90]"
+                devInfo.isRgbCamera -> " [RGB CAM - 0xFF20]"
+                else -> ""
+            }
+            sb.append(" • Cam #${index + 1}: ${devInfo.productName ?: devInfo.deviceName} [${devInfo.getFormattedVidPid()}]$roleTag - $permText\n")
         }
 
         activity?.runOnUiThread {
@@ -455,20 +704,35 @@ class KioskCameraFragment : Fragment() {
             }
         }
 
-        if (uvcDevices.isNotEmpty()) {
-            assignedDeviceA = uvcDevices[0].device
-            updateDeviceInfoA(uvcDevices[0])
-        } else {
-            assignedDeviceA = null
-            updateDeviceInfoA(null)
-        }
+        // --- HARDWARE BINDING THEO PID ---
+        // Camera A = IR Camera (ZM-MTW172IR, PID 0xFF90)
+        // Camera B = RGB Camera (ZM-MTW172C, PID 0xFF20)
+        val irInfo = uvcDevices.find { it.isIrCamera }
+        val rgbInfo = uvcDevices.find { it.isRgbCamera }
 
-        if (uvcDevices.size > 1) {
-            assignedDeviceB = uvcDevices[1].device
-            updateDeviceInfoB(uvcDevices[1])
+        if (irInfo != null || rgbInfo != null) {
+            assignedDeviceA = irInfo?.device
+            updateDeviceInfoA(irInfo)
+
+            assignedDeviceB = rgbInfo?.device
+            updateDeviceInfoB(rgbInfo)
         } else {
-            assignedDeviceB = null
-            updateDeviceInfoB(null)
+            // FALLBACK CHO MÔI TRƯỜNG DEV (khi dùng webcam ngoài hoặc camera thử nghiệm khác)
+            if (uvcDevices.isNotEmpty()) {
+                assignedDeviceA = uvcDevices[0].device
+                updateDeviceInfoA(uvcDevices[0])
+            } else {
+                assignedDeviceA = null
+                updateDeviceInfoA(null)
+            }
+
+            if (uvcDevices.size > 1) {
+                assignedDeviceB = uvcDevices[1].device
+                updateDeviceInfoB(uvcDevices[1])
+            } else {
+                assignedDeviceB = null
+                updateDeviceInfoB(null)
+            }
         }
     }
 
@@ -477,10 +741,11 @@ class KioskCameraFragment : Fragment() {
             binding.tvDeviceInfoA.text = "Thiết bị: Chưa kết nối"
             binding.tvStatusBadgeA.text = "CHƯA PHÁT HIỆN"
             binding.tvStatusBadgeA.setBackgroundColor(0xFF555555.toInt())
-            binding.tvOverlayA.text = "Chưa cắm Cam A"
+            binding.tvOverlayA.text = "Chưa cắm Cam A (IR)"
             binding.tvOverlayA.visibility = View.VISIBLE
         } else {
-            binding.tvDeviceInfoA.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
+            val typeLabel = if (info.isIrCamera) " [IR]" else ""
+            binding.tvDeviceInfoA.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})$typeLabel"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeA.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFFE65100.toInt())
@@ -489,8 +754,10 @@ class KioskCameraFragment : Fragment() {
             } else if (mCameraA?.isCameraOpened() != true) {
                 binding.tvStatusBadgeA.text = "SẴN SÀNG"
                 binding.tvStatusBadgeA.setBackgroundColor(0xFF1565C0.toInt())
-                binding.tvOverlayA.text = "Sẵn sàng mở"
+                binding.tvOverlayA.text = "Camera IR sẵn sàng. Đang kết nối luồng video..."
                 binding.tvOverlayA.visibility = View.VISIBLE
+                // Tự động kết nối Camera A (IR) nếu đã có quyền
+                connectCameraA()
             }
         }
     }
@@ -504,7 +771,8 @@ class KioskCameraFragment : Fragment() {
             binding.tvOverlayB.visibility = View.VISIBLE
             setVerificationState(VerificationState.CAMERA_CONNECTING)
         } else {
-            binding.tvDeviceInfoB.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})"
+            val typeLabel = if (info.isRgbCamera) " [RGB]" else ""
+            binding.tvDeviceInfoB.text = "${info.productName ?: info.deviceName} (${info.getFormattedVidPid()})$typeLabel"
             if (!info.hasPermission) {
                 binding.tvStatusBadgeB.text = "CẦN QUYỀN USB"
                 binding.tvStatusBadgeB.setBackgroundColor(0xFFE65100.toInt())
@@ -561,17 +829,29 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun onDeviceConnected(device: UsbDevice, ctrlBlock: USBMonitor.UsbControlBlock) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
-            openCameraPanelA(device, ctrlBlock)
-        } else if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
-            openCameraPanelB(device, ctrlBlock)
-        } else {
-            if (assignedDeviceA == null) {
+        when {
+            UsbDiagnosticHelper.isIrCamera(device) -> {
                 assignedDeviceA = device
                 openCameraPanelA(device, ctrlBlock)
-            } else if (assignedDeviceB == null) {
+            }
+            UsbDiagnosticHelper.isRgbCamera(device) -> {
                 assignedDeviceB = device
                 openCameraPanelB(device, ctrlBlock)
+            }
+            assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device) -> {
+                openCameraPanelA(device, ctrlBlock)
+            }
+            assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device) -> {
+                openCameraPanelB(device, ctrlBlock)
+            }
+            else -> {
+                if (assignedDeviceA == null) {
+                    assignedDeviceA = device
+                    openCameraPanelA(device, ctrlBlock)
+                } else if (assignedDeviceB == null) {
+                    assignedDeviceB = device
+                    openCameraPanelB(device, ctrlBlock)
+                }
             }
         }
     }
@@ -607,6 +887,8 @@ class KioskCameraFragment : Fragment() {
                             appendLog("🟢 Camera A: Đã mở luồng video thành công!")
                             self.getPreviewSize()?.let { size ->
                                 updatePreviewAspectRatio(binding.uvcSurfaceViewA, size.width, size.height)
+                                latestIrWidth = size.width
+                                latestIrHeight = size.height
                             }
                             binding.tvStatusBadgeA.text = "STREAMING"
                             binding.tvStatusBadgeA.setBackgroundColor(0xFF2E7D32.toInt())
@@ -634,6 +916,10 @@ class KioskCameraFragment : Fragment() {
         camera.addPreviewDataCallBack(object : IPreviewDataCallBack {
             override fun onPreviewData(data: ByteArray?, format: IPreviewDataCallBack.DataFormat) {
                 frameCountA++
+                if (data != null) {
+                    latestIrFrameBytes = data.clone()
+                    latestIrTimestamp = SystemClock.elapsedRealtime()
+                }
             }
         })
 
@@ -753,11 +1039,17 @@ class KioskCameraFragment : Fragment() {
                             if (faces.isEmpty()) {
                                 latestDetectedBox = null
                                 latestNv21Bytes = null
+                                latestIrMetrics = null
                                 resetVerificationStreak()
+                                resetLivenessStreak()
                                 binding.faceOverlayB.clear()
+                                binding.faceOverlayA.clear()
+                                binding.tvIrTelemetryA.text = "IR Quang phổ: Chờ phát hiện mặt..."
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
 
-                                if (currentVerificationState == VerificationState.DETECTING || currentVerificationState == VerificationState.VERIFYING) {
+                                if (currentVerificationState == VerificationState.DETECTING ||
+                                    currentVerificationState == VerificationState.CHECKING_LIVENESS ||
+                                    currentVerificationState == VerificationState.VERIFYING) {
                                     setVerificationState(VerificationState.IDLE)
                                 }
                             } else {
@@ -778,12 +1070,34 @@ class KioskCameraFragment : Fragment() {
                                 }
 
                                 val box = face.boundingBox
+                                val trackId = face.trackingId
                                 latestDetectedBox = box
                                 latestNv21Bytes = frameBytes
                                 latestFrameWidth = width
                                 latestFrameHeight = height
 
                                 binding.faceOverlayB.setFaces(listOf(face), width, height)
+
+                                // Hiệu chuẩn và phân tích quang phổ IR (Giai đoạn 2)
+                                val rgbTimestamp = SystemClock.elapsedRealtime()
+                                val irBytes = latestIrFrameBytes
+                                val irW = latestIrWidth
+                                val irH = latestIrHeight
+                                val deltaTimestamp = Math.abs(rgbTimestamp - latestIrTimestamp)
+                                val irBox = ParallaxMapper.mapRgbToIr(box, width, height, irW, irH)
+
+                                binding.faceOverlayA.setCustomRects(listOf(irBox), irW, irH)
+
+                                // Khóa định danh khuôn mặt bằng ML Kit Tracking ID (Giai đoạn 4)
+                                if (trackId != currentTrackingId) {
+                                    if (currentTrackingId != null) {
+                                        appendLog("👤 Đổi track khuôn mặt: #$currentTrackingId -> #${trackId ?: "NONE"} (Reset Liveness)")
+                                    }
+                                    currentTrackingId = trackId
+                                    isLivenessVerified = false
+                                    livenessPassStreak = 0
+                                    resetVerificationStreak()
+                                }
 
                                 // Quality checks: face size, head pose angles, and boundary clipping
                                 val isSizeOk = box.width() >= MIN_FACE_PIXEL_SIZE && box.height() >= MIN_FACE_PIXEL_SIZE
@@ -799,6 +1113,7 @@ class KioskCameraFragment : Fragment() {
 
                                 if (!isQualityOk) {
                                     resetVerificationStreak()
+                                    resetLivenessStreak()
                                     if (!isSizeOk) {
                                         binding.tvFaceStatusB.text = "👤 Vui lòng lại gần camera hơn (Mặt: ${box.width()}px < ${MIN_FACE_PIXEL_SIZE}px)"
                                     } else if (!isPoseOk) {
@@ -806,10 +1121,107 @@ class KioskCameraFragment : Fragment() {
                                     } else {
                                         binding.tvFaceStatusB.text = "👤 Vui lòng đưa khuôn mặt vào giữa khung hình"
                                     }
+                                    if (currentVerificationState == VerificationState.CHECKING_LIVENESS ||
+                                        currentVerificationState == VerificationState.VERIFYING) {
+                                        setVerificationState(VerificationState.DETECTING)
+                                    }
                                 } else {
                                     binding.tvFaceStatusB.text = "👤 ML Kit: Khung hình đạt chuẩn | Detect FPS: $faceDetectFps"
 
-                                    // Multi-Sample Enrollment Handler (Phase 5)
+                                    val ctx = context
+                                    val now = SystemClock.elapsedRealtime()
+
+                                    // 1. Kiểm tra Cooldown bảo vệ sau khi bị từ chối
+                                    if (now < livenessCooldownUntilMs) {
+                                        val remainingSec = Math.ceil((livenessCooldownUntilMs - now) / 1000.0).toInt().coerceAtLeast(1)
+                                        setVerificationState(VerificationState.LIVENESS_FAILED)
+                                        binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                                        binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại cảm biến (${remainingSec}s)..."
+                                        binding.tvFaceStatusB.text = "⏳ Cooldown an ninh: Chờ ${remainingSec}s trước khi quét tiếp"
+                                        if (ctx != null) {
+                                            binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_warning))
+                                        }
+                                        return@runOnUiThread
+                                    }
+
+                                    // 2. Cổng Anti-Spoofing & Liveness (Temporal Voting 3 khung hình liên tiếp ở tốc độ 4-5 fps)
+                                    if (!isLivenessVerified) {
+                                        if (now - lastLivenessSampleTimestamp >= LIVENESS_SAMPLE_INTERVAL_MS) {
+                                            lastLivenessSampleTimestamp = now
+                                            setVerificationState(VerificationState.CHECKING_LIVENESS)
+                                            binding.tvStatusTitle.text = "Kiểm tra độ sống khuôn mặt..."
+                                            binding.tvStatusMessage.text = "Vui lòng giữ nguyên khuôn mặt (${livenessPassStreak + 1}/$REQUIRED_LIVENESS_FRAMES)..."
+
+                                            val fas = antiSpoofingEngine
+                                            if (fas != null && fas.isModelReady()) {
+                                                val liveness = fas.classifyLiveness(
+                                                    rgbNv21 = frameBytes,
+                                                    rgbWidth = width,
+                                                    rgbHeight = height,
+                                                    rgbFaceBox = box,
+                                                    irNv21 = irBytes,
+                                                    irWidth = irW,
+                                                    irHeight = irH,
+                                                    irFaceBox = irBox,
+                                                    deltaTimestampMs = deltaTimestamp
+                                                )
+                                                latestLivenessResult = liveness
+                                                binding.tvIrTelemetryA.text = liveness.toDiagnosticString()
+                                                binding.faceOverlayA.setHighlightColor(if (liveness.irPass) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt())
+
+                                                // Ghi nhận dữ liệu thực nghiệm Benchmark (Stage 5)
+                                                val logger = benchmarkLogger
+                                                if (logger != null && logger.isRecording) {
+                                                    logger.recordSample(liveness, trackId ?: -1)
+                                                    updateBenchmarkUI()
+                                                }
+
+                                                if (liveness.isLive) {
+                                                    livenessPassStreak++
+                                                    if (ctx != null) {
+                                                        binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+                                                    }
+                                                    appendLog("🛡️ [LIVENESS] Khung $livenessPassStreak/$REQUIRED_LIVENESS_FRAMES ĐẠT: Real=${(liveness.realScore * 100).toInt()}%, IR=${if (liveness.irPass) "PASS" else "FAIL"}")
+
+                                                    if (livenessPassStreak >= REQUIRED_LIVENESS_FRAMES) {
+                                                        isLivenessVerified = true
+                                                        consecutiveSpoofFailures = 0
+                                                        appendLog("✅ [LIVENESS] Xác nhận người thật thành công sau $livenessPassStreak khung hình! (Track #${trackId ?: "N/A"})")
+                                                    } else {
+                                                        return@runOnUiThread
+                                                    }
+                                                } else {
+                                                    // Không vượt qua liveness
+                                                    livenessPassStreak = 0
+                                                    isLivenessVerified = false
+                                                    consecutiveSpoofFailures++
+                                                    val cooldownMs = when (consecutiveSpoofFailures) {
+                                                        1 -> 2500L
+                                                        2 -> 5000L
+                                                        else -> 15000L
+                                                    }
+                                                    livenessCooldownUntilMs = now + cooldownMs
+                                                    appendLog("❌ [SPOOF_REJECTED] Lần $consecutiveSpoofFailures: ${liveness.rejectionReason} -> Cooldown ${cooldownMs / 1000}s (Track #${trackId ?: "N/A"})")
+
+                                                    setVerificationState(VerificationState.LIVENESS_FAILED)
+                                                    binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                                                    binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại (${cooldownMs / 1000}s)..."
+                                                    if (ctx != null) {
+                                                        binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
+                                                    }
+                                                    return@runOnUiThread
+                                                }
+                                            } else {
+                                                // Engine chưa sẵn sàng
+                                                isLivenessVerified = true
+                                            }
+                                        } else {
+                                            // Đang chờ khoảng cách lấy mẫu
+                                            return@runOnUiThread
+                                        }
+                                    }
+
+                                    // 3. Multi-Sample Enrollment Handler (Phase 5) - Chỉ thực thi khi ĐÃ xác minh liveness!
                                     val enrollAcc = pendingRegistrationAccount
                                     if (enrollAcc != null) {
                                         val model = faceNetModel
@@ -839,11 +1251,11 @@ class KioskCameraFragment : Fragment() {
                                         return@runOnUiThread
                                     }
 
+                                    // 4. Face Recognition Verification Handler - Chỉ thực thi khi ĐÃ xác minh liveness!
                                     if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile && currentVerificationState != VerificationState.VERIFYING) {
                                         setVerificationState(VerificationState.DETECTING)
                                     }
 
-                                    val ctx = context
                                     if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile && currentVerificationState != VerificationState.UNRECOGNIZED) {
                                         performFaceVerification(frameBytes, width, height, face.boundingBox)
                                     }
@@ -1094,6 +1506,11 @@ class KioskCameraFragment : Fragment() {
     ) {
         if (isNavigatingToProfile) return
 
+        if (!isLivenessVerified) {
+            appendLog("⚠️ [FR] Từ chối so khớp: Chưa vượt qua kiểm tra Anti-Spoofing (Liveness).")
+            return
+        }
+
         val model = faceNetModel
         if (model == null || !model.isModelReady()) {
             appendLog("⚠️ [FR] FaceNetModel chưa sẵn sàng hoặc lỗi TFLite - từ chối xác thực")
@@ -1174,6 +1591,7 @@ class KioskCameraFragment : Fragment() {
                 appendLog("✅ [FR] Xác thực thành công sau $currentStreakCount khung hình liên tiếp! ID=${matchedUser.studentId}, Tương đồng TB=$percentStr | Margin=$marginStr")
                 appendLog("📊 $diagLog | streak=$currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES | DECISION=ACCEPTED")
                 resetVerificationStreak()
+                resetLivenessStreak()
 
                 // Tra cứu tài khoản theo định danh ID
                 val account = AccountRepository.findAccountById(matchedUser.studentId)
@@ -1364,6 +1782,15 @@ class KioskCameraFragment : Fragment() {
                 appendLog("⏹️ Đã đóng Camera A.")
             }
             mCameraA = null
+            latestIrFrameBytes = null
+            latestIrTimestamp = 0L
+            latestIrMetrics = null
+            activity?.runOnUiThread {
+                if (_binding != null) {
+                    binding.faceOverlayA.clear()
+                    binding.tvIrTelemetryA.text = "IR Quang phổ: Camera A đã đóng"
+                }
+            }
         } catch (e: Exception) {
             appendLog("⚠️ Lỗi khi đóng Camera A: ${e.message}")
         }
@@ -1457,23 +1884,27 @@ class KioskCameraFragment : Fragment() {
     }
 
     private fun onDeviceDetached(device: UsbDevice) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
-            appendLog("🔌 Ngắt kết nối USB Camera A")
+        if (UsbDiagnosticHelper.isIrCamera(device) || assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
+            appendLog("🔌 Ngắt kết nối USB Camera A (IR)")
             closeCameraA()
+            assignedDeviceA = null
         }
-        if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
-            appendLog("🔌 Ngắt kết nối USB Camera B")
+        if (UsbDiagnosticHelper.isRgbCamera(device) || assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
+            appendLog("🔌 Ngắt kết nối USB Camera B (RGB)")
             closeCameraB()
+            assignedDeviceB = null
         }
         refreshUsbDevices()
     }
 
     private fun onDeviceDisconnected(device: UsbDevice) {
-        if (assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
+        if (UsbDiagnosticHelper.isIrCamera(device) || assignedDeviceA?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceA, device)) {
             closeCameraA()
+            assignedDeviceA = null
         }
-        if (assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
+        if (UsbDiagnosticHelper.isRgbCamera(device) || assignedDeviceB?.deviceId == device.deviceId || isSameUsbDevice(assignedDeviceB, device)) {
             closeCameraB()
+            assignedDeviceB = null
         }
     }
 
@@ -1547,6 +1978,13 @@ class KioskCameraFragment : Fragment() {
 
         closeCameraA()
         closeCameraB()
+
+        try {
+            antiSpoofingEngine?.close()
+            antiSpoofingEngine = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         try {
             faceNetModel?.close()

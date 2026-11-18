@@ -34,10 +34,12 @@ class KioskLogicTest {
     @Test
     fun testVerificationStatesEnum() {
         val states = KioskCameraFragment.VerificationState.values()
-        assertEquals(7, states.size)
+        assertEquals(9, states.size)
         assertTrue(states.contains(KioskCameraFragment.VerificationState.CAMERA_CONNECTING))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.IDLE))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.DETECTING))
+        assertTrue(states.contains(KioskCameraFragment.VerificationState.CHECKING_LIVENESS))
+        assertTrue(states.contains(KioskCameraFragment.VerificationState.LIVENESS_FAILED))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.VERIFYING))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.SUCCESS))
         assertTrue(states.contains(KioskCameraFragment.VerificationState.UNRECOGNIZED))
