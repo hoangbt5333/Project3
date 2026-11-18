@@ -34,9 +34,12 @@ import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.data.UserRole
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
 import com.example.testcamera.ml.AntiSpoofingEngine
+import com.example.testcamera.ml.AttackScenario
 import com.example.testcamera.ml.FaceNetModel
+import com.example.testcamera.ml.LivenessBenchmarkLogger
 import com.example.testcamera.ml.LivenessMode
 import com.example.testcamera.ml.LivenessResult
+import com.example.testcamera.ml.TestDistance
 import com.example.testcamera.util.IrMetrics
 import com.example.testcamera.util.IrOpticalAnalyzer
 import com.example.testcamera.util.NV21ToBitmapConverter
@@ -124,6 +127,7 @@ class KioskCameraFragment : Fragment() {
 
     // Anti-Spoofing & Liveness Engine (Stage 3 & 4)
     private var antiSpoofingEngine: AntiSpoofingEngine? = null
+    private var benchmarkLogger: LivenessBenchmarkLogger? = null
     private var currentTrackingId: Int? = null
     private var isLivenessVerified = false
     private var livenessPassStreak = 0
@@ -136,6 +140,31 @@ class KioskCameraFragment : Fragment() {
         currentTrackingId = null
         isLivenessVerified = false
         livenessPassStreak = 0
+    }
+
+    private fun updateBenchmarkUI() {
+        if (_binding == null) return
+        val logger = benchmarkLogger ?: return
+        val stats = logger.getInMemoryStats()
+        binding.tvBenchmarkSummary.text = String.format(
+            Locale.US,
+            "Mẫu: %d | APCER: %.1f%% (%d/%d) | BPCER: %.1f%% (%d/%d) | ACER: %.1f%%",
+            stats.totalSamples,
+            stats.apcer * 100f,
+            stats.attackFalseAcceptCount,
+            stats.attackCount,
+            stats.bpcer * 100f,
+            stats.bonaFideFalseRejectCount,
+            stats.bonaFideCount,
+            stats.acer * 100f
+        )
+        binding.btnToggleBenchmarkRecording.text = if (logger.isRecording) {
+            "⏹️ Dừng Ghi (${logger.getRecordsCount()})"
+        } else {
+            "🔴 Bắt đầu Ghi (${logger.getRecordsCount()})"
+        }
+        binding.btnSelectAttackScenario.text = "🎯 ${logger.currentScenario.displayName}"
+        binding.btnSelectTestDistance.text = "📏 ${logger.currentDistance.label}"
     }
 
     // Face Recognition (Phase 3 & 4)
@@ -261,6 +290,7 @@ class KioskCameraFragment : Fragment() {
     private fun initAntiSpoofingEngine() {
         try {
             val ctx = context ?: return
+            benchmarkLogger = LivenessBenchmarkLogger.getInstance(ctx)
             antiSpoofingEngine = AntiSpoofingEngine(ctx)
             if (antiSpoofingEngine?.isModelReady() == true) {
                 appendLog("✅ Khởi tạo AntiSpoofingEngine (MiniFASNetV2 + IR Hybrid) thành công.")
@@ -268,6 +298,7 @@ class KioskCameraFragment : Fragment() {
                 val errorMsg = antiSpoofingEngine?.loadError ?: "Không tìm thấy tệp silentface.tflite trong assets"
                 appendLog("❌ [LỖI FAS TFLITE] Mô hình chưa sẵn sàng: $errorMsg")
             }
+            updateBenchmarkUI()
         } catch (e: Exception) {
             appendLog("⚠️ Khởi tạo Anti-Spoofing Engine: ${e.message}")
         }
@@ -356,6 +387,49 @@ class KioskCameraFragment : Fragment() {
             binding.btnToggleLivenessMode.text = "🛡️ Chế độ Liveness: $modeLabel"
             appendLog("🛡️ Chuyển chế độ Liveness: $modeLabel")
             Toast.makeText(context, "Chế độ Liveness: $modeLabel", Toast.LENGTH_SHORT).show()
+        }
+
+        // Benchmark & Evaluation Listeners (Stage 5)
+        binding.btnSelectAttackScenario.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.currentScenario = logger.currentScenario.next()
+            updateBenchmarkUI()
+            appendLog("🎯 Chọn kịch bản kiểm thử: ${logger.currentScenario.displayName}")
+        }
+
+        binding.btnSelectTestDistance.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.currentDistance = logger.currentDistance.next()
+            updateBenchmarkUI()
+            appendLog("📏 Chọn khoảng cách đo: ${logger.currentDistance.label}")
+        }
+
+        binding.btnToggleBenchmarkRecording.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            val isRec = logger.toggleRecording()
+            if (isRec) {
+                appendLog("🔴 [BENCHMARK] Bắt đầu phiên ghi log dữ liệu...")
+            } else {
+                appendLog("⏹️ [BENCHMARK] Đã dừng ghi log dữ liệu. Tổng số mẫu: ${logger.getRecordsCount()}")
+            }
+            updateBenchmarkUI()
+        }
+
+        binding.btnExportBenchmarkStats.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            val summary = logger.getFormattedSummary()
+            val file = logger.getBenchmarkFile()
+            appendLog("📁 [BENCHMARK EXPORT]\n$summary\n📄 File CSV: ${file.absolutePath} (${if (file.exists()) file.length() else 0} bytes)")
+            Toast.makeText(context, "Đã xuất thống kê! Xem trong Log Console.", Toast.LENGTH_LONG).show()
+            updateBenchmarkUI()
+        }
+
+        binding.btnClearBenchmarkData.setOnClickListener {
+            val logger = benchmarkLogger ?: return@setOnClickListener
+            logger.clearAllData()
+            updateBenchmarkUI()
+            appendLog("🗑️ Đã xóa sạch dữ liệu Benchmark trong bộ nhớ và file CSV.")
+            Toast.makeText(context, "Đã xóa log benchmark!", Toast.LENGTH_SHORT).show()
         }
 
         // Panel A Buttons
@@ -1081,6 +1155,13 @@ class KioskCameraFragment : Fragment() {
                                                 latestLivenessResult = liveness
                                                 binding.tvIrTelemetryA.text = liveness.toDiagnosticString()
                                                 binding.faceOverlayA.setHighlightColor(if (liveness.irPass) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt())
+
+                                                // Ghi nhận dữ liệu thực nghiệm Benchmark (Stage 5)
+                                                val logger = benchmarkLogger
+                                                if (logger != null && logger.isRecording) {
+                                                    logger.recordSample(liveness, trackId ?: -1)
+                                                    updateBenchmarkUI()
+                                                }
 
                                                 if (liveness.isLive) {
                                                     livenessPassStreak++
