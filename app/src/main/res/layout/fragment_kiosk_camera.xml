@@ -598,6 +598,16 @@
                     </LinearLayout>
 
                     <Button
+                        android:id="@+id/btnToggleLivenessMode"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:text="🛡️ Chế độ Liveness: HYBRID (IR + RGB)"
+                        android:textColor="#FFEB3B"
+                        android:textSize="11sp" />
+
+                    <Button
                         android:id="@+id/btnOpenAdminDashboardFromCamera"
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="match_parent"

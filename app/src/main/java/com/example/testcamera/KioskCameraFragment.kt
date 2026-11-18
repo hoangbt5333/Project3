@@ -33,7 +33,10 @@ import com.example.testcamera.data.UserFaceModel
 import com.example.testcamera.data.UserFaceRepository
 import com.example.testcamera.data.UserRole
 import com.example.testcamera.databinding.FragmentKioskCameraBinding
+import com.example.testcamera.ml.AntiSpoofingEngine
 import com.example.testcamera.ml.FaceNetModel
+import com.example.testcamera.ml.LivenessMode
+import com.example.testcamera.ml.LivenessResult
 import com.example.testcamera.util.IrMetrics
 import com.example.testcamera.util.IrOpticalAnalyzer
 import com.example.testcamera.util.NV21ToBitmapConverter
@@ -66,6 +69,8 @@ class KioskCameraFragment : Fragment() {
         private const val MIN_FACE_PIXEL_SIZE = 90
         private const val MAX_HEAD_POSE_DEGREE = 18f
         private const val REQUIRED_ENROLLMENT_SAMPLES = 3
+        private const val REQUIRED_LIVENESS_FRAMES = 3
+        private const val LIVENESS_SAMPLE_INTERVAL_MS = 200L
 
         fun newInstance(openInTechMode: Boolean = false): KioskCameraFragment {
             val fragment = KioskCameraFragment()
@@ -81,6 +86,8 @@ class KioskCameraFragment : Fragment() {
         CAMERA_CONNECTING,
         IDLE,
         DETECTING,
+        CHECKING_LIVENESS,
+        LIVENESS_FAILED,
         VERIFYING,
         SUCCESS,
         UNRECOGNIZED,
@@ -114,6 +121,22 @@ class KioskCameraFragment : Fragment() {
     private val isProcessingFaceFrame = AtomicBoolean(false)
     private var faceDetectCount = 0
     private var faceDetectFps = 0
+
+    // Anti-Spoofing & Liveness Engine (Stage 3 & 4)
+    private var antiSpoofingEngine: AntiSpoofingEngine? = null
+    private var currentTrackingId: Int? = null
+    private var isLivenessVerified = false
+    private var livenessPassStreak = 0
+    private var lastLivenessSampleTimestamp = 0L
+    private var consecutiveSpoofFailures = 0
+    private var livenessCooldownUntilMs = 0L
+    private var latestLivenessResult: LivenessResult? = null
+
+    private fun resetLivenessStreak() {
+        currentTrackingId = null
+        isLivenessVerified = false
+        livenessPassStreak = 0
+    }
 
     // Face Recognition (Phase 3 & 4)
     private var faceNetModel: FaceNetModel? = null
@@ -185,6 +208,7 @@ class KioskCameraFragment : Fragment() {
 
         initFaceDetector()
         initFaceRecognitionModel()
+        initAntiSpoofingEngine()
         initMultiCameraClient()
         setupListeners()
 
@@ -231,6 +255,21 @@ class KioskCameraFragment : Fragment() {
             }
         } catch (e: Exception) {
             appendLog("⚠️ Khởi tạo Face Recognition Model: ${e.message}")
+        }
+    }
+
+    private fun initAntiSpoofingEngine() {
+        try {
+            val ctx = context ?: return
+            antiSpoofingEngine = AntiSpoofingEngine(ctx)
+            if (antiSpoofingEngine?.isModelReady() == true) {
+                appendLog("✅ Khởi tạo AntiSpoofingEngine (MiniFASNetV2 + IR Hybrid) thành công.")
+            } else {
+                val errorMsg = antiSpoofingEngine?.loadError ?: "Không tìm thấy tệp silentface.tflite trong assets"
+                appendLog("❌ [LỖI FAS TFLITE] Mô hình chưa sẵn sàng: $errorMsg")
+            }
+        } catch (e: Exception) {
+            appendLog("⚠️ Khởi tạo Anti-Spoofing Engine: ${e.message}")
         }
     }
 
@@ -295,8 +334,28 @@ class KioskCameraFragment : Fragment() {
 
         binding.btnRetryVerification.setOnClickListener {
             resetVerificationStreak()
+            resetLivenessStreak()
+            livenessCooldownUntilMs = 0L
+            consecutiveSpoofFailures = 0
             setVerificationState(VerificationState.IDLE)
             isAutoVerificationEnabled = true
+        }
+
+        binding.btnToggleLivenessMode.setOnClickListener {
+            val engine = antiSpoofingEngine ?: return@setOnClickListener
+            engine.mode = when (engine.mode) {
+                LivenessMode.HYBRID_AND -> LivenessMode.RGB_ONLY
+                LivenessMode.RGB_ONLY -> LivenessMode.IR_ONLY
+                LivenessMode.IR_ONLY -> LivenessMode.HYBRID_AND
+            }
+            val modeLabel = when (engine.mode) {
+                LivenessMode.HYBRID_AND -> "HYBRID (IR + RGB)"
+                LivenessMode.RGB_ONLY -> "CHỈ RGB (MiniFASNet)"
+                LivenessMode.IR_ONLY -> "CHỈ IR (Quang phổ)"
+            }
+            binding.btnToggleLivenessMode.text = "🛡️ Chế độ Liveness: $modeLabel"
+            appendLog("🛡️ Chuyển chế độ Liveness: $modeLabel")
+            Toast.makeText(context, "Chế độ Liveness: $modeLabel", Toast.LENGTH_SHORT).show()
         }
 
         // Panel A Buttons
@@ -460,6 +519,24 @@ class KioskCameraFragment : Fragment() {
                 binding.btnRetryVerification.visibility = View.GONE
                 binding.layoutSuccessBanner.visibility = View.GONE
                 binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+            }
+            VerificationState.CHECKING_LIVENESS -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.hust_gold))
+                binding.tvStatusTitle.text = "Kiểm tra độ sống khuôn mặt..."
+                binding.tvStatusMessage.text = "Vui lòng giữ nguyên vị trí và nhìn thẳng..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+            }
+            VerificationState.LIVENESS_FAILED -> {
+                binding.ivStatusIcon.setImageResource(R.drawable.ic_alert)
+                binding.ivStatusIcon.setColorFilter(ContextCompat.getColor(ctx, R.color.status_warning))
+                binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại cảm biến..."
+                binding.btnRetryVerification.visibility = View.GONE
+                binding.layoutSuccessBanner.visibility = View.GONE
+                binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
             }
             VerificationState.VERIFYING -> {
                 binding.ivStatusIcon.setImageResource(R.drawable.ic_face_scan)
@@ -877,12 +954,15 @@ class KioskCameraFragment : Fragment() {
                                 latestNv21Bytes = null
                                 latestIrMetrics = null
                                 resetVerificationStreak()
+                                resetLivenessStreak()
                                 binding.faceOverlayB.clear()
                                 binding.faceOverlayA.clear()
                                 binding.tvIrTelemetryA.text = "IR Quang phổ: Chờ phát hiện mặt..."
                                 binding.tvFaceStatusB.text = "👤 ML Kit: Không có khuôn mặt (0 face) | Detect FPS: $faceDetectFps"
 
-                                if (currentVerificationState == VerificationState.DETECTING || currentVerificationState == VerificationState.VERIFYING) {
+                                if (currentVerificationState == VerificationState.DETECTING ||
+                                    currentVerificationState == VerificationState.CHECKING_LIVENESS ||
+                                    currentVerificationState == VerificationState.VERIFYING) {
                                     setVerificationState(VerificationState.IDLE)
                                 }
                             } else {
@@ -903,6 +983,7 @@ class KioskCameraFragment : Fragment() {
                                 }
 
                                 val box = face.boundingBox
+                                val trackId = face.trackingId
                                 latestDetectedBox = box
                                 latestNv21Bytes = frameBytes
                                 latestFrameWidth = width
@@ -920,14 +1001,15 @@ class KioskCameraFragment : Fragment() {
 
                                 binding.faceOverlayA.setCustomRects(listOf(irBox), irW, irH)
 
-                                if (irBytes != null && deltaTimestamp <= 300) {
-                                    val metrics = IrOpticalAnalyzer.analyze(irBytes, irW, irH, irBox)
-                                    latestIrMetrics = metrics
-                                    binding.tvIrTelemetryA.text = "IR: ${metrics.toTelemetryString(deltaTimestamp)}"
-                                    binding.faceOverlayA.setHighlightColor(if (metrics.isPass) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt())
-                                } else {
-                                    binding.tvIrTelemetryA.text = "IR: Lệch khung hình (Δt: ${deltaTimestamp}ms)"
-                                    binding.faceOverlayA.setHighlightColor(0xFFFF9800.toInt())
+                                // Khóa định danh khuôn mặt bằng ML Kit Tracking ID (Giai đoạn 4)
+                                if (trackId != currentTrackingId) {
+                                    if (currentTrackingId != null) {
+                                        appendLog("👤 Đổi track khuôn mặt: #$currentTrackingId -> #${trackId ?: "NONE"} (Reset Liveness)")
+                                    }
+                                    currentTrackingId = trackId
+                                    isLivenessVerified = false
+                                    livenessPassStreak = 0
+                                    resetVerificationStreak()
                                 }
 
                                 // Quality checks: face size, head pose angles, and boundary clipping
@@ -944,6 +1026,7 @@ class KioskCameraFragment : Fragment() {
 
                                 if (!isQualityOk) {
                                     resetVerificationStreak()
+                                    resetLivenessStreak()
                                     if (!isSizeOk) {
                                         binding.tvFaceStatusB.text = "👤 Vui lòng lại gần camera hơn (Mặt: ${box.width()}px < ${MIN_FACE_PIXEL_SIZE}px)"
                                     } else if (!isPoseOk) {
@@ -951,10 +1034,100 @@ class KioskCameraFragment : Fragment() {
                                     } else {
                                         binding.tvFaceStatusB.text = "👤 Vui lòng đưa khuôn mặt vào giữa khung hình"
                                     }
+                                    if (currentVerificationState == VerificationState.CHECKING_LIVENESS ||
+                                        currentVerificationState == VerificationState.VERIFYING) {
+                                        setVerificationState(VerificationState.DETECTING)
+                                    }
                                 } else {
                                     binding.tvFaceStatusB.text = "👤 ML Kit: Khung hình đạt chuẩn | Detect FPS: $faceDetectFps"
 
-                                    // Multi-Sample Enrollment Handler (Phase 5)
+                                    val ctx = context
+                                    val now = SystemClock.elapsedRealtime()
+
+                                    // 1. Kiểm tra Cooldown bảo vệ sau khi bị từ chối
+                                    if (now < livenessCooldownUntilMs) {
+                                        val remainingSec = Math.ceil((livenessCooldownUntilMs - now) / 1000.0).toInt().coerceAtLeast(1)
+                                        setVerificationState(VerificationState.LIVENESS_FAILED)
+                                        binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                                        binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại cảm biến (${remainingSec}s)..."
+                                        binding.tvFaceStatusB.text = "⏳ Cooldown an ninh: Chờ ${remainingSec}s trước khi quét tiếp"
+                                        if (ctx != null) {
+                                            binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_warning))
+                                        }
+                                        return@runOnUiThread
+                                    }
+
+                                    // 2. Cổng Anti-Spoofing & Liveness (Temporal Voting 3 khung hình liên tiếp ở tốc độ 4-5 fps)
+                                    if (!isLivenessVerified) {
+                                        if (now - lastLivenessSampleTimestamp >= LIVENESS_SAMPLE_INTERVAL_MS) {
+                                            lastLivenessSampleTimestamp = now
+                                            setVerificationState(VerificationState.CHECKING_LIVENESS)
+                                            binding.tvStatusTitle.text = "Kiểm tra độ sống khuôn mặt..."
+                                            binding.tvStatusMessage.text = "Vui lòng giữ nguyên khuôn mặt (${livenessPassStreak + 1}/$REQUIRED_LIVENESS_FRAMES)..."
+
+                                            val fas = antiSpoofingEngine
+                                            if (fas != null && fas.isModelReady()) {
+                                                val liveness = fas.classifyLiveness(
+                                                    rgbNv21 = frameBytes,
+                                                    rgbWidth = width,
+                                                    rgbHeight = height,
+                                                    rgbFaceBox = box,
+                                                    irNv21 = irBytes,
+                                                    irWidth = irW,
+                                                    irHeight = irH,
+                                                    irFaceBox = irBox,
+                                                    deltaTimestampMs = deltaTimestamp
+                                                )
+                                                latestLivenessResult = liveness
+                                                binding.tvIrTelemetryA.text = liveness.toDiagnosticString()
+                                                binding.faceOverlayA.setHighlightColor(if (liveness.irPass) 0xFF4CAF50.toInt() else 0xFFFF5252.toInt())
+
+                                                if (liveness.isLive) {
+                                                    livenessPassStreak++
+                                                    if (ctx != null) {
+                                                        binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.hust_gold))
+                                                    }
+                                                    appendLog("🛡️ [LIVENESS] Khung $livenessPassStreak/$REQUIRED_LIVENESS_FRAMES ĐẠT: Real=${(liveness.realScore * 100).toInt()}%, IR=${if (liveness.irPass) "PASS" else "FAIL"}")
+
+                                                    if (livenessPassStreak >= REQUIRED_LIVENESS_FRAMES) {
+                                                        isLivenessVerified = true
+                                                        consecutiveSpoofFailures = 0
+                                                        appendLog("✅ [LIVENESS] Xác nhận người thật thành công sau $livenessPassStreak khung hình! (Track #${trackId ?: "N/A"})")
+                                                    } else {
+                                                        return@runOnUiThread
+                                                    }
+                                                } else {
+                                                    // Không vượt qua liveness
+                                                    livenessPassStreak = 0
+                                                    isLivenessVerified = false
+                                                    consecutiveSpoofFailures++
+                                                    val cooldownMs = when (consecutiveSpoofFailures) {
+                                                        1 -> 2500L
+                                                        2 -> 5000L
+                                                        else -> 15000L
+                                                    }
+                                                    livenessCooldownUntilMs = now + cooldownMs
+                                                    appendLog("❌ [SPOOF_REJECTED] Lần $consecutiveSpoofFailures: ${liveness.rejectionReason} -> Cooldown ${cooldownMs / 1000}s (Track #${trackId ?: "N/A"})")
+
+                                                    setVerificationState(VerificationState.LIVENESS_FAILED)
+                                                    binding.tvStatusTitle.text = "Vui lòng nhìn thẳng và giữ yên"
+                                                    binding.tvStatusMessage.text = "Hệ thống đang chuẩn bị lại (${cooldownMs / 1000}s)..."
+                                                    if (ctx != null) {
+                                                        binding.faceOverlayB.setHighlightColor(ContextCompat.getColor(ctx, R.color.status_error))
+                                                    }
+                                                    return@runOnUiThread
+                                                }
+                                            } else {
+                                                // Engine chưa sẵn sàng
+                                                isLivenessVerified = true
+                                            }
+                                        } else {
+                                            // Đang chờ khoảng cách lấy mẫu
+                                            return@runOnUiThread
+                                        }
+                                    }
+
+                                    // 3. Multi-Sample Enrollment Handler (Phase 5) - Chỉ thực thi khi ĐÃ xác minh liveness!
                                     val enrollAcc = pendingRegistrationAccount
                                     if (enrollAcc != null) {
                                         val model = faceNetModel
@@ -984,11 +1157,11 @@ class KioskCameraFragment : Fragment() {
                                         return@runOnUiThread
                                     }
 
+                                    // 4. Face Recognition Verification Handler - Chỉ thực thi khi ĐÃ xác minh liveness!
                                     if (currentVerificationState != VerificationState.SUCCESS && !isNavigatingToProfile && currentVerificationState != VerificationState.VERIFYING) {
                                         setVerificationState(VerificationState.DETECTING)
                                     }
 
-                                    val ctx = context
                                     if (isAutoVerificationEnabled && ctx != null && UserFaceRepository.getUserCount(ctx) > 0 && !isNavigatingToProfile && currentVerificationState != VerificationState.UNRECOGNIZED) {
                                         performFaceVerification(frameBytes, width, height, face.boundingBox)
                                     }
@@ -1239,6 +1412,11 @@ class KioskCameraFragment : Fragment() {
     ) {
         if (isNavigatingToProfile) return
 
+        if (!isLivenessVerified) {
+            appendLog("⚠️ [FR] Từ chối so khớp: Chưa vượt qua kiểm tra Anti-Spoofing (Liveness).")
+            return
+        }
+
         val model = faceNetModel
         if (model == null || !model.isModelReady()) {
             appendLog("⚠️ [FR] FaceNetModel chưa sẵn sàng hoặc lỗi TFLite - từ chối xác thực")
@@ -1319,6 +1497,7 @@ class KioskCameraFragment : Fragment() {
                 appendLog("✅ [FR] Xác thực thành công sau $currentStreakCount khung hình liên tiếp! ID=${matchedUser.studentId}, Tương đồng TB=$percentStr | Margin=$marginStr")
                 appendLog("📊 $diagLog | streak=$currentStreakCount/$REQUIRED_CONSECUTIVE_MATCHES | DECISION=ACCEPTED")
                 resetVerificationStreak()
+                resetLivenessStreak()
 
                 // Tra cứu tài khoản theo định danh ID
                 val account = AccountRepository.findAccountById(matchedUser.studentId)
@@ -1628,6 +1807,13 @@ class KioskCameraFragment : Fragment() {
 
         closeCameraA()
         closeCameraB()
+
+        try {
+            antiSpoofingEngine?.close()
+            antiSpoofingEngine = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         try {
             faceNetModel?.close()
